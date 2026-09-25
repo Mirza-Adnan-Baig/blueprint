@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Phase I -- native environment setup for the Mac Studio.
 #
-# Needs an internet connection ONCE (Homebrew packages, Python packages,
-# model downloads). After it finishes, everything runs fully offline.
+# Downloads Homebrew packages, Python packages and ~45 GB of models, so
+# it needs the internet connection. Safe to re-run later: it upgrades
+# Ollama and skips anything already in place.
 #
 # Prerequisite: SETUP.md sections 1-3.3 done (admin rights confirmed,
 # Xcode Command Line Tools and Homebrew installed).
@@ -129,4 +130,4 @@ echo "Setup complete. Verify (SETUP.md section 7):"
 echo "  $OLLAMA_BIN --version"
 echo "  $OLLAMA_BIN list        # expect $CODE_MODEL and $VISION_MODEL"
 echo "  uv run pytest tests/ -v"
-echo "Then disconnect from the internet and follow SETUP.md section 6 to confirm offline operation."
+echo "Then continue with SETUP.md section 5 (Open WebUI) and section 6 (end-to-end check)."

@@ -1,13 +1,13 @@
-# Mac Studio environment setup — from unknown state to verified, offline
+# Mac Studio environment setup — from unknown state to verified
 
 Use this when you don't know what's installed on the machine, or don't
 trust that it was installed correctly. It assumes nothing except that
 macOS is running. Every command says what it does and what the output
 should look like.
 
-**Target:** Apple Silicon Mac Studio (M2 Ultra, 64GB unified memory),
-running 100% offline once set up. Only free, open-source / open-weight
-software is used: Ollama, Qwen2.5 models, Open WebUI, Python, DuckDB.
+**Target:** Apple Silicon Mac Studio (M2 Ultra, 64GB unified memory).
+Only free, open-source / open-weight software is used: Ollama, Qwen2.5
+models, Open WebUI, Python, DuckDB.
 
 **How to use this:** open Terminal (`Cmd+Space`, type `Terminal`, press
 Enter). Every fenced code block below is meant to be copied into Terminal
@@ -17,18 +17,19 @@ value from an earlier output — never paste those literally.
 
 ---
 
-## 0. Two phases: connected once, then air-gapped
+## 0. What the internet connection is — and isn't — used for
 
-Downloads are unavoidable exactly once: Homebrew packages, Python
-packages, and the two models (about 45 GB together). So setup happens in
-two phases:
+The Mac is connected to the internet. That connection is used **only to
+download and update software and models**: Homebrew packages, Python
+packages, Ollama itself, and models via `ollama pull` (about 45 GB for
+the two this project uses — you can add others any time, see section 9).
 
-1. **Connected phase** — sections 1–5. The Mac needs internet.
-2. **Air-gapped phase** — section 6. Disconnect, then prove that
-   everything still works with no network at all. From then on, nothing
-   in this system needs or attempts an internet connection.
-
-If this Mac may never touch the internet at all, see section 9 first.
+It is **never** used to process documents. Uploaded files, the questions
+asked about them, and the answers all stay on the Mac: the models run
+locally in Ollama, the data sits in local DuckDB files, and no cloud AI
+service or API key is involved anywhere. Section 5 switches off the
+parts of Open WebUI that would otherwise talk to outside services
+(its default OpenAI connection and its usage analytics).
 
 ---
 
@@ -251,22 +252,21 @@ launchctl kickstart -k gui/$(id -u)/com.docintel.ollama
 
 ---
 
-## 5. Open WebUI, configured for offline use
+## 5. Open WebUI, configured so nothing leaves the Mac
 
-Open WebUI tries by default to check for updates and download helper
-models from the internet. These settings turn that off:
+Open WebUI can talk to cloud AI services and sends anonymous usage
+analytics by default. None of that is needed here, so these settings
+switch it off. Update checks and downloads still work normally.
 
 | Setting | Value | Effect |
 |---|---|---|
-| `OFFLINE_MODE` | `true` | No update checks, no automatic model downloads |
-| `HF_HUB_OFFLINE` | `1` | Never contact Hugging Face |
-| `ENABLE_OPENAI_API` | `false` | Removes the default OpenAI (cloud) connection |
+| `ENABLE_OPENAI_API` | `false` | Removes the default OpenAI (cloud) connection, so no chat can accidentally go to a cloud model |
 | `SCARF_NO_ANALYTICS`, `DO_NOT_TRACK` | `true` | No usage analytics |
 | `ANONYMIZED_TELEMETRY` | `false` | No telemetry from the bundled vector store |
 
 ### Option A — native (if not installed, or you're moving it off Docker)
 
-Install (needs internet, part of the connected phase):
+Install:
 ```bash
 uv tool install --python 3.11 open-webui
 ```
@@ -291,8 +291,6 @@ cat > ~/Library/LaunchAgents/com.docintel.openwebui.plist <<EOF
   <dict>
     <key>DATA_DIR</key><string>$HOME/open-webui-data</string>
     <key>OLLAMA_BASE_URL</key><string>http://127.0.0.1:11434</string>
-    <key>OFFLINE_MODE</key><string>true</string>
-    <key>HF_HUB_OFFLINE</key><string>1</string>
     <key>ENABLE_OPENAI_API</key><string>false</string>
     <key>SCARF_NO_ANALYTICS</key><string>true</string>
     <key>DO_NOT_TRACK</key><string>true</string>
@@ -330,8 +328,6 @@ docker run -d -p 3000:8080 \
   --add-host=host.docker.internal:host-gateway \
   -v <volume-name>:/app/backend/data \
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-  -e OFFLINE_MODE=true \
-  -e HF_HUB_OFFLINE=1 \
   -e ENABLE_OPENAI_API=false \
   -e SCARF_NO_ANALYTICS=true \
   -e DO_NOT_TRACK=true \
@@ -354,30 +350,26 @@ the Ollama connection should be green, and no OpenAI connection listed.
 
 ---
 
-## 6. Go offline and prove it
-
-Disconnect: unplug the network cable and/or turn Wi-Fi off. Then:
+## 6. Check the whole system end to end
 
 ```bash
 ollama list
 curl http://127.0.0.1:11434
 cd ~/blueprint
-UV_OFFLINE=1 uv run pytest tests/ -v
+uv run pytest tests/ -v
 ```
-Expect: models listed, `Ollama is running`, and all tests passing — with
-no network at all. (`UV_OFFLINE=1` makes `uv` fail loudly rather than
-quietly try to download something.)
+Expect: both models listed, `Ollama is running`, and all tests passing.
 
 Then do one real end-to-end run: start the pipeline service (README
-section 9), upload a document in Open WebUI and ask a question. It must
-work with the cable unplugged.
+section 9), upload a document in Open WebUI and ask a question.
 
-Finally, check that nothing is trying to reach out:
+Finally, confirm which services are reachable from where:
 ```bash
-lsof -nP -iTCP -sTCP:ESTABLISHED | grep -v 127.0.0.1
+lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(11434|8080|3000) '
 ```
-With the network disconnected this should print nothing, or only
-connections between Open WebUI and the browsers on your local network.
+Expect `127.0.0.1:11434` (Ollama) and `127.0.0.1:8080` (pipeline) —
+reachable only from the Mac itself — and `*:3000` for Open WebUI, the one
+thing office PCs are meant to open.
 
 ---
 
@@ -408,7 +400,8 @@ its own after a power cut:
 - [ ] `curl http://127.0.0.1:11434` → `Ollama is running`
 - [ ] Open WebUI loads at `http://<mac-ip>:3000` from another computer
 - [ ] `uv run pytest tests/ -v` → all pass
-- [ ] Section 6 done with the network physically disconnected
+- [ ] Section 6: a real document answered through Open WebUI; Ollama and
+      the pipeline listening on `127.0.0.1` only
 - [ ] After ingesting a scanned PDF, `ollama ps` shows **only**
       `qwen2.5-coder:32b` (the vision model was evicted — README
       section 5)
@@ -416,31 +409,40 @@ its own after a power cut:
 
 ---
 
-## 9. If this Mac can never be connected to the internet
+## 9. Later: trying other models, and keeping things updated
 
-Then all downloads happen on a second Mac that is online, and the results
-are carried over on an external drive:
+### Download and try a different model
+```bash
+ollama pull <model-name>
+```
+Then point the pipeline at it in `~/blueprint/.env` (`CODE_MODEL=` for
+the model that writes code, `VISION_MODEL=` for scanned pages) and
+restart the pipeline service:
+```bash
+launchctl kickstart -k gui/$(id -u)/com.docintel.pipeline
+```
+Keep the 64GB limit in mind (README section 5): one model is loaded at a
+time, and it should stay under roughly 30 GB including its context. At
+the usual 4-bit download size, that means models up to about 32B
+parameters. `ollama ps` shows what a loaded model really uses.
 
-1. On the online Mac, run sections 3.3–4 there.
-2. Copy to the drive:
-   - `~/.ollama/models` — the downloaded model files
-   - the whole `~/blueprint` folder, **including** its `.venv`
-   - `~/.local/bin/uv` — the `uv` program (a single file)
-   - `~/.local/share/uv` — the Python interpreter `uv` downloaded; the
-     `.venv` points into it and does not work without it
-   - the standalone Ollama command-line build, `ollama-darwin.tgz`,
-     from the Assets list of the latest release on Ollama's GitHub
-     releases page. It needs no Homebrew.
-3. On the offline Mac, put everything back at the same paths (same
-   user name on both Macs keeps those paths identical), and
-   unpack `ollama-darwin.tgz` into a folder such as `~/ollama`. Then
-   write the LaunchAgent from `scripts/setup_mac.sh` step 4 by hand, with
-   `ProgramArguments` pointing at `~/ollama/ollama`.
+Free the disk space of a model you no longer use:
+```bash
+ollama rm <model-name>
+```
 
-Both Macs should run the same macOS major version and the same Python
-version, or the copied `.venv` may not work. This path is more fragile
-than a one-time connected setup — use it only if policy really requires
-it.
+### Update the software
+```bash
+brew upgrade ollama
+launchctl kickstart -k gui/$(id -u)/com.docintel.ollama
+cd ~/blueprint && git pull && uv sync
+launchctl kickstart -k gui/$(id -u)/com.docintel.pipeline
+```
+Open WebUI, native: `uv tool upgrade open-webui`, then
+`launchctl kickstart -k gui/$(id -u)/com.docintel.openwebui`.
+Open WebUI, Docker: `docker pull ghcr.io/open-webui/open-webui:main`,
+then re-create the container with the same `docker run` command from
+section 5 (option B) — the data volume keeps users and chats.
 
 ---
 

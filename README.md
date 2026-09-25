@@ -3,9 +3,10 @@
 Upload a large, messy business document (Excel, CSV, PDF — text or
 scanned) and get calculated answers back, computed against the *actual*
 data, not guessed from whatever part of it a language model happened to
-read. Runs entirely on one machine, **100% offline**, using only free,
-open-source and open-weight software. No cloud services, no API keys, no
-internet connection after the one-time setup.
+read. Runs entirely on one machine, using only free, open-source and
+open-weight software. **Documents, questions and answers never leave the
+Mac** — no cloud AI services, no API keys. The Mac's internet connection
+is used only to download and update software and models.
 
 This README is the whole build guide. Every code file it describes
 already exists in this repo — this document explains why each one is
@@ -109,8 +110,8 @@ Follow **[`SETUP.md`](SETUP.md)** from top to bottom. It starts by
 inspecting the machine without changing anything (is Ollama native or in
 Docker? which version? is Open WebUI there?), then walks through every
 installation step with the exact commands and expected output, runs
-`scripts/setup_mac.sh`, configures Open WebUI for offline use, and ends
-with you disconnecting the network and proving everything still works.
+`scripts/setup_mac.sh`, configures Open WebUI so nothing leaves the Mac,
+and ends with an end-to-end check of the whole system.
 
 Come back here when its final checklist is complete.
 
@@ -450,9 +451,9 @@ ingestion finished, look for "FAILED to evict" in `logs/pipeline.log`.
 ## 12. Testing
 
 ```bash
-UV_OFFLINE=1 uv run pytest tests/ -v
+uv run pytest tests/ -v
 ```
-Runs without Ollama and without a network. Model calls are replaced by a
+Runs without Ollama. Model calls are replaced by a
 fake that records what would have been sent. Covered:
 
 - German number parsing
@@ -470,21 +471,21 @@ hand with the `curl` commands in section 9, with real documents.
 
 ---
 
-## 13. Offline guarantees
+## 13. What stays on the Mac
 
-| Component | Why it doesn't touch the network |
+The internet connection is for downloading software and models (`brew`,
+`uv`, `ollama pull`). Document processing never uses it:
+
+| Component | Why your data stays local |
 |---|---|
-| Ollama | Bound to `127.0.0.1`; models already on disk; nothing to download |
-| Models | Open-weight files in `~/.ollama/models` |
-| Pipeline service | Bound to `127.0.0.1`; only talks to Ollama on the same Mac |
-| DuckDB | Local Python library inside the process; extension auto-install/auto-load off |
-| Sandbox | No network modules importable; DuckDB external access off |
-| Open WebUI | `OFFLINE_MODE`, `HF_HUB_OFFLINE`, OpenAI connection and telemetry off (SETUP.md section 5) |
-| Homebrew | Analytics off; not used at runtime |
-| `uv` | Not used at runtime; `UV_OFFLINE=1` makes accidental downloads fail loudly |
+| Ollama | Models run on the Mac's own GPU; listens on `127.0.0.1` only |
+| Pipeline service | Listens on `127.0.0.1` only; talks to nothing but Ollama on the same Mac |
+| DuckDB | Local Python library inside the pipeline's own process; extension auto-install/auto-load off |
+| Sandbox | No network modules importable; DuckDB file access outside the document's database off |
+| Open WebUI | Cloud (OpenAI) connection and usage analytics off (SETUP.md section 5) |
+| Homebrew | Analytics off; only used when installing/updating |
 
-SETUP.md section 6 proves this with the network cable physically
-unplugged.
+SETUP.md section 6 checks the listening addresses.
 
 ---
 

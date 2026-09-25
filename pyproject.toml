@@ -1,7 +1,7 @@
 [project]
 name = "docintel-pipeline"
 version = "0.2.0"
-description = "Local, offline document intelligence pipeline: upload a document, get calculated answers."
+description = "Local document intelligence pipeline: upload a document, get calculated answers."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
