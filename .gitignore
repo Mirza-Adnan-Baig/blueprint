@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+storage/ingested/*
+!storage/ingested/.gitkeep
+storage/duckdb/*
+!storage/duckdb/.gitkeep
+logs/*
+!logs/.gitkeep
+.DS_Store
