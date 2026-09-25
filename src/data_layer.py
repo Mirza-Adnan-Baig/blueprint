@@ -2,31 +2,34 @@
 The data layer: turns a File Doctor result into DuckDB tables and produces
 the small schema summary that actually goes into the model's context.
 
-This is deliberately not a vector store. Retrieval-by-embedding was
-considered and dropped for structured data: top-k chunk retrieval can
-silently omit rows, which breaks exactly the kind of question this system
-exists to answer (counts, sums, "how many of X do we have"). Instead, the
-full dataset is loaded into DuckDB and the model only ever sees the
-SCHEMA -- table names, columns, types, a handful of sample rows, and row
-counts -- never the data itself. It writes SQL/code against the schema;
-that code runs against every row. See README.md, "Why DuckDB instead of a
-vector store."
+DuckDB here is a local, open-source Python library -- an embedded database
+engine running inside this process, like SQLite. Nothing is sent anywhere.
+Extension auto-install is switched off so it can never try to download
+anything, even by accident.
+
+This is deliberately not a vector store. Top-k chunk retrieval can
+silently omit rows, which breaks counts and sums. The full dataset is
+loaded into DuckDB and the model only ever sees the SCHEMA -- table names,
+columns, types, row counts, a few sample rows -- never the data itself.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import duckdb
-import pandas as pd
 
+import config
 from smart_router import IngestResult
 
-DUCKDB_DIR = Path(os.environ.get("DUCKDB_DIR", "./storage/duckdb"))
-DUCKDB_DIR.mkdir(parents=True, exist_ok=True)
-
 SAMPLE_ROWS = 5
+
+OFFLINE_DUCKDB_CONFIG = {
+    "autoinstall_known_extensions": False,
+    "autoload_known_extensions": False,
+}
+
+DUCKDB_DIR = config.DUCKDB_DIR
 
 
 def db_path(doc_id: str) -> Path:
@@ -36,7 +39,7 @@ def db_path(doc_id: str) -> Path:
 def load_into_duckdb(doc_id: str, result: IngestResult) -> Path:
     """Register every table from an IngestResult into a per-document DuckDB file."""
     path = db_path(doc_id)
-    con = duckdb.connect(str(path))
+    con = duckdb.connect(str(path), config=OFFLINE_DUCKDB_CONFIG)
 
     try:
         con.execute("CREATE TABLE IF NOT EXISTS document_text (block_index INTEGER, content TEXT)")
@@ -49,8 +52,10 @@ def load_into_duckdb(doc_id: str, result: IngestResult) -> Path:
             con.unregister("tmp_df")
 
         if result.text_blocks:
-            rows = [(i, block) for i, block in enumerate(result.text_blocks)]
-            con.executemany("INSERT INTO document_text VALUES (?, ?)", rows)
+            con.executemany(
+                "INSERT INTO document_text VALUES (?, ?)",
+                list(enumerate(result.text_blocks)),
+            )
     finally:
         con.close()
 
@@ -58,18 +63,12 @@ def load_into_duckdb(doc_id: str, result: IngestResult) -> Path:
 
 
 def schema_summary(doc_id: str) -> str:
-    """Produce the compact, human/LLM-readable schema description used in prompts.
-
-    This is the ONLY representation of the data that reaches the model's
-    context window before it writes code -- table + column names, types,
-    row counts, and a few sample rows. Deliberately small regardless of how
-    large the underlying table is.
-    """
+    """The ONLY representation of the data that reaches the model's prompt."""
     path = db_path(doc_id)
     if not path.exists():
         raise FileNotFoundError(f"No ingested data for doc_id={doc_id}")
 
-    con = duckdb.connect(str(path), read_only=True)
+    con = duckdb.connect(str(path), read_only=True, config=OFFLINE_DUCKDB_CONFIG)
     try:
         tables = con.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
@@ -94,7 +93,7 @@ def schema_summary(doc_id: str) -> str:
         if text_count:
             parts.append(
                 f'TABLE "document_text" ({text_count} rows) -- free-text blocks '
-                f"(columns: block_index INTEGER, content TEXT). Query with LIKE/string "
+                f"(columns: block_index INTEGER, content TEXT). Query with LIKE / string "
                 f"functions for prose content that isn't tabular."
             )
 

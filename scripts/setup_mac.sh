@@ -1,57 +1,132 @@
 #!/usr/bin/env bash
 # Phase I -- native environment setup for the Mac Studio.
-# Run this once, from the Terminal app, from inside the cloned repo folder.
+#
+# Needs an internet connection ONCE (Homebrew packages, Python packages,
+# model downloads). After it finishes, everything runs fully offline.
+#
+# Prerequisite: SETUP.md sections 1-3.3 done (admin rights confirmed,
+# Xcode Command Line Tools and Homebrew installed).
+#
+# Run from Terminal, inside the repo folder:  ./scripts/setup_mac.sh
 set -euo pipefail
 
-echo "== 1. Checking for Docker-based Ollama =="
-if command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qi ollama; then
-    echo "Found an Ollama container. Stopping and removing it (native Ollama will replace it)."
-    docker stop ollama || true
-    docker rm ollama || true
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_DIR"
+
+CODE_MODEL="qwen2.5-coder:32b"
+VISION_MODEL="qwen2.5vl:32b"
+OLLAMA_PLIST="$HOME/Library/LaunchAgents/com.docintel.ollama.plist"
+
+echo "== 1. Hardware check =="
+if [ "$(uname -m)" != "arm64" ]; then
+    echo "This is not an Apple Silicon Mac (uname -m = $(uname -m)). Stopping."
+    exit 1
+fi
+echo "Apple Silicon confirmed."
+
+echo "== 2. Docker-based Ollama =="
+if command -v docker >/dev/null 2>&1; then
+    CONTAINERS="$(docker ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null | grep -i ollama | awk '{print $1}' || true)"
+    if [ -n "$CONTAINERS" ]; then
+        echo "Found Ollama container(s): $CONTAINERS"
+        read -r -p "Stop and remove them? Native Ollama replaces them. [y/N] " answer
+        if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+            for c in $CONTAINERS; do docker stop "$c" || true; docker rm "$c" || true; done
+        else
+            echo "Left in place. Make sure they are stopped, or they will fight over port 11434."
+        fi
+    else
+        echo "No Ollama containers."
+    fi
 else
-    echo "No Docker Ollama container found, nothing to remove."
+    echo "Docker not installed, nothing to check."
 fi
 
-echo "== 2. Installing Homebrew (if missing) =="
+if [ -d /Applications/Ollama.app ]; then
+    echo "WARNING: /Applications/Ollama.app exists. The desktop app starts its own server on"
+    echo "port 11434 at login and will conflict with the service this script sets up."
+    echo "Quit it and remove it from System Settings > General > Login Items (SETUP.md 3.4)."
+fi
+
+echo "== 3. Homebrew =="
 if ! command -v brew >/dev/null 2>&1; then
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    echo "Homebrew not found. Follow SETUP.md section 3.3 first, then re-run this script."
+    exit 1
 fi
+brew analytics off
 
-echo "== 3. Installing native Ollama =="
-if ! command -v ollama >/dev/null 2>&1; then
+echo "== 4. Native Ollama =="
+if brew list ollama >/dev/null 2>&1; then
+    brew upgrade ollama || true
+else
     brew install ollama
 fi
-brew services start ollama
-sleep 3
+OLLAMA_BIN="$(brew --prefix)/bin/ollama"
+"$OLLAMA_BIN" --version || true
 
-echo "== 4. Installing uv (Python package/venv manager) =="
+# Our own LaunchAgent instead of `brew services`, because a background
+# service never reads ~/.zprofile -- environment variables have to live in
+# the plist itself to actually reach the Ollama server.
+brew services stop ollama >/dev/null 2>&1 || true
+mkdir -p "$HOME/Library/LaunchAgents" "$REPO_DIR/logs"
+cat > "$OLLAMA_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.docintel.ollama</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$OLLAMA_BIN</string>
+    <string>serve</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OLLAMA_HOST</key><string>127.0.0.1:11434</string>
+    <key>OLLAMA_CONTEXT_LENGTH</key><string>32768</string>
+    <key>OLLAMA_MAX_LOADED_MODELS</key><string>1</string>
+    <key>OLLAMA_NUM_PARALLEL</key><string>1</string>
+    <key>OLLAMA_KEEP_ALIVE</key><string>5m</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$REPO_DIR/logs/ollama.log</string>
+  <key>StandardErrorPath</key><string>$REPO_DIR/logs/ollama.log</string>
+</dict>
+</plist>
+EOF
+launchctl bootout "gui/$(id -u)/com.docintel.ollama" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$(id -u)" "$OLLAMA_PLIST"
+
+echo "Waiting for Ollama to answer on 127.0.0.1:11434 ..."
+for _ in $(seq 1 30); do
+    if curl -s http://127.0.0.1:11434 >/dev/null; then break; fi
+    sleep 1
+done
+curl -s http://127.0.0.1:11434 && echo
+
+echo "== 5. Models (large downloads) =="
+"$OLLAMA_BIN" pull "$CODE_MODEL"
+"$OLLAMA_BIN" pull "$VISION_MODEL"
+
+echo "== 6. uv and Python dependencies =="
 if ! command -v uv >/dev/null 2>&1; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="$HOME/.local/bin:$PATH"
 fi
-
-echo "== 5. Pulling models =="
-ollama pull qwen2.5-coder:32b
-ollama pull llava
-
-echo "== 6. Setting context window =="
-# OLLAMA_CONTEXT_LENGTH controls the default num_ctx for the server; the
-# pipeline also passes num_ctx explicitly per-request (see .env NUM_CTX),
-# so this just raises the server-side default/floor.
-launchctl setenv OLLAMA_CONTEXT_LENGTH 32768
-echo "Add 'export OLLAMA_CONTEXT_LENGTH=32768' to your shell profile so it survives a reboot."
-
-echo "== 7. Python project setup =="
 uv sync
 
-echo "== 8. Copying .env =="
+echo "== 7. .env =="
 if [ ! -f .env ]; then
     cp .env.example .env
-    echo "Created .env from .env.example -- review it before starting the service."
+    echo "Created .env from .env.example."
+else
+    echo ".env already exists, left unchanged."
 fi
 
 echo
-echo "Setup complete. Verify with:"
-echo "  ollama --version     (want 0.34.0 or newer)"
-echo "  ollama list           (should show qwen2.5-coder:32b and llava)"
-echo "  uv run uvicorn --app-dir src pipeline_api:app --port 8080"
+echo "Setup complete. Verify (SETUP.md section 7):"
+echo "  $OLLAMA_BIN --version"
+echo "  $OLLAMA_BIN list        # expect $CODE_MODEL and $VISION_MODEL"
+echo "  uv run pytest tests/ -v"
+echo "Then disconnect from the internet and follow SETUP.md section 6 to confirm offline operation."

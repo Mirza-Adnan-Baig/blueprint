@@ -1,7 +1,7 @@
 [project]
 name = "docintel-pipeline"
-version = "0.1.0"
-description = "Local document intelligence pipeline: upload a document, get calculated answers, no cloud calls."
+version = "0.2.0"
+description = "Local, offline document intelligence pipeline: upload a document, get calculated answers."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
@@ -10,13 +10,16 @@ dependencies = [
     "pandas>=2.2",
     "duckdb>=1.1",
     "openpyxl>=3.1",
+    "xlrd>=2.0",
     "pdfplumber>=0.11",
     "pymupdf>=1.24",
     "requests>=2.32",
     "python-dotenv>=1.0",
+    "psutil>=6.0",
+    "tabulate>=0.9",
 ]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.3",
 ]
