@@ -109,7 +109,17 @@ blueprint/
 
 ## 3. Phase I — Environment setup on the Mac
 
-Run once, from Terminal, inside this repo folder:
+**If you don't already know what's currently installed on this Mac (or
+don't trust it), start with [`SETUP.md`](SETUP.md) instead of this
+section.** It's a from-scratch, assume-nothing guide: how to check
+whether Ollama/Open WebUI are native or running inside Docker, how to
+tell if they're set up correctly, and detailed step-by-step installation
+for everything (Homebrew, Ollama, Open WebUI, `uv`) with the actual
+commands and what their output should look like — not just "install
+Homebrew." Come back here once its checklist is green.
+
+If the environment is already verified, run this once from Terminal,
+inside this repo folder:
 
 ```bash
 chmod +x scripts/setup_mac.sh
