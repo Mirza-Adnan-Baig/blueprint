@@ -142,12 +142,19 @@ step "7. Downloading the models (large, can take a long time)"
 "$OLLAMA_BIN" pull "$CODE_MODEL"
 "$OLLAMA_BIN" pull "$VISION_MODEL"
 
-step "8. Installing uv and the project's Python packages"
+step "8. Installing uv, Python and the project's Python packages"
 if ! command -v uv >/dev/null 2>&1; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 export PATH="$HOME/.local/bin:$PATH"
+# Python itself: uv downloads its own copy (the version in .python-version).
+# The Python that comes with Apple's Command Line Tools is too old (3.9).
+uv python install
+# pandas, DuckDB, pdfplumber, PyMuPDF, FastAPI, ... from pyproject.toml,
+# into the project's own .venv folder.
 uv sync
+echo "Installed:"
+uv run python -c "import sys, pandas, duckdb, pdfplumber, pymupdf, fastapi; print('  Python', sys.version.split()[0]); print('  pandas', pandas.__version__); print('  DuckDB', duckdb.__version__); print('  pdfplumber', pdfplumber.__version__); print('  PyMuPDF', pymupdf.VersionBind); print('  FastAPI', fastapi.__version__)"
 
 step "9. Settings file (.env)"
 if [ ! -f .env ]; then

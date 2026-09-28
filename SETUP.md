@@ -18,6 +18,28 @@ administration. Follow it from top to bottom and don't skip sections.
 **You need:** the Mac's admin password, an internet connection, and this
 guide open on a second screen or another computer.
 
+### Everything that gets installed, and which step installs it
+
+A fresh Mac has none of the developer tools this project needs: no git,
+no usable Python, no pandas or DuckDB. You don't install those one by
+one. Two steps are done by hand, and the setup script installs the rest.
+
+| What | What it's for | Installed by |
+|---|---|---|
+| Xcode Command Line Tools, which include **git** | git downloads this project from GitHub. | **You, by hand:** section 3.3 |
+| **Homebrew** | Installs command-line programs such as Ollama. | **You, by hand:** section 3.4 (it asks for your password) |
+| **Ollama** (native, not in Docker) | Runs the AI models. | The setup script, step 4 |
+| The two **models** | The AI itself. About 45 GB. | The setup script, step 7 |
+| **uv** | Installs Python and the Python libraries. | The setup script, step 8 |
+| **Python 3.12** | The language the project is written in. | The setup script, step 8 (uv downloads it) |
+| **pandas, DuckDB, pdfplumber, PyMuPDF, openpyxl, FastAPI, uvicorn** and a few more | The Python libraries the code uses. The full list is in `pyproject.toml`. | The setup script, step 8 (`uv sync`) |
+| **Open WebUI** | The web page staff use. Probably already there. | Already installed, or by you: section 5 |
+| **VS Code** | Only if you want to read or edit the code. Not needed to run anything. | Optional, by you: section 4.5 |
+
+The Python libraries go into a folder inside the project,
+`~/blueprint/.venv`. They don't touch the rest of the Mac, and deleting
+that folder removes them completely.
+
 ---
 
 ## Before you start: how to use Terminal
@@ -100,6 +122,19 @@ The name printed by the first command must appear in the second one.
 If you are not an admin, stop here. Whoever manages this Mac has to make
 your account an admin first. Nothing in this guide can do that for you.
 
+### 1.2a Are Apple's developer tools (and git) installed?
+```bash
+xcode-select -p
+```
+- It prints `/Library/Developer/CommandLineTools` (or a path containing
+  `Xcode.app`): the tools and git are installed. You can skip 3.3 later.
+- It prints an error such as `unable to get active developer directory`:
+  not installed. You'll install them in section 3.3.
+
+Don't type `git` or `python3` to check. On a Mac without the developer
+tools, those words open an install window. That's harmless, but it's
+better to install them in section 3.3 on purpose.
+
 ### 1.3 Is Docker installed, and what runs in it?
 ```bash
 ls /Applications | grep -i docker
@@ -154,14 +189,19 @@ If Ollama only exists in Docker, use the container name from 1.3:
 ```bash
 docker exec -it <container-name> ollama list
 ```
-Old models aren't harmful, but each one takes disk space. You can remove
-one later with `ollama rm <model-name>`.
+Models already on the Mac (for example a small IBM Granite model someone
+installed for testing) are kept. Native Ollama uses the same model folder
+as the Ollama desktop app, so they stay available in Open WebUI. Only
+models that lived inside a Docker container are not carried over. Old
+models aren't harmful, but each one takes disk space; you can remove one
+later with `ollama rm <model-name>`.
 
 ### 1.7 Write down what you found
 
 | Question | Your answer |
 |---|---|
 | Admin rights? | yes / no |
+| Developer tools (git) installed? (1.2a) | yes / no |
 | Free disk space | ___ GB |
 | Ollama is | native / desktop app / in Docker / not installed |
 | Ollama container name (if Docker) | ___ |
@@ -208,9 +248,14 @@ which blocks the one this project sets up.
 3. Recommended: open Finder → Applications and drag **Ollama** to the
    Trash.
 
-### 3.3 Xcode Command Line Tools
-These are Apple's developer tools. Homebrew and `git` need them. It's a
-small download, not the full Xcode app.
+### 3.3 Xcode Command Line Tools (this also installs git)
+These are Apple's basic developer tools. They include **git**, which
+section 4 uses to download this project, and Homebrew needs them too.
+It's a small download (about 1 GB), not the full Xcode app. They also
+include an old Python (3.9), which this project does **not** use; the
+setup script installs its own, newer Python later.
+
+Skip this if 1.2a showed the tools are already installed.
 ```bash
 xcode-select --install
 ```
@@ -222,8 +267,10 @@ xcode-select --install
 Check:
 ```bash
 xcode-select -p
+git --version
 ```
-It should print `/Library/Developer/CommandLineTools`.
+The first should print `/Library/Developer/CommandLineTools`, the second
+a version such as `git version 2.39.5`.
 
 ### 3.4 Homebrew
 Homebrew installs command-line programs on a Mac. First check if it's
@@ -290,7 +337,7 @@ internet connection.
 | 5 | Makes sure nothing else is using Ollama's port. If the Ollama desktop app is running, it quits it. If something else blocks the port, it stops and tells you what. |
 | 6 | Starts Ollama as a background service that also starts after every reboot, with the memory settings this project needs. |
 | 7 | Downloads the two models (about 45 GB). |
-| 8 | Installs `uv` (Python's package manager) and this project's Python packages. |
+| 8 | Installs `uv`, then Python 3.12 (uv downloads it), then every Python library the project needs: pandas, DuckDB, pdfplumber, PyMuPDF, openpyxl, FastAPI, uvicorn and a few more, all into `~/blueprint/.venv`. At the end it prints the installed versions. |
 | 9 | Creates the settings file `.env`. |
 | 10 | Runs the project's automatic tests. They must all pass. |
 | 11 | Starts the pipeline service and the hourly cleanup job as background services, then waits until the pipeline answers. |
@@ -325,6 +372,39 @@ need to change them.
 | `OLLAMA_MAX_LOADED_MODELS` | `1` | Never two big models in memory at the same time (64 GB isn't enough for both). |
 | `OLLAMA_NUM_PARALLEL` | `1` | One request at a time per model; parallel slots each need extra memory. |
 | `OLLAMA_KEEP_ALIVE` | `5m` | Unload a model after 5 idle minutes, unless the pipeline pinned it. |
+
+### 4.5 Optional: VS Code, for reading and editing the code
+Nothing in this guide needs VS Code; the system runs without it. Install
+it only if you want to work on the code on the Mac.
+
+1. Install it with Homebrew:
+   ```bash
+   brew install --cask visual-studio-code
+   ```
+   This also installs the `code` command for Terminal.
+2. Open the project:
+   ```bash
+   code ~/blueprint
+   ```
+   If VS Code asks **"Do you trust the authors of the files in this
+   folder?"**, click **Yes, I trust the authors**.
+3. Install the Python extension: click the Extensions icon on the left
+   (four small squares), search for **Python**, and install the one
+   published by **Microsoft**.
+4. Tell VS Code to use the project's Python (the one with pandas and
+   DuckDB in it): press `Cmd + Shift + P`, type **Python: Select
+   Interpreter**, press Enter, and choose the entry that shows
+   `.venv/bin/python` (it may say "Recommended").
+5. VS Code has a built-in Terminal: menu **Terminal → New Terminal**. It
+   opens already inside `~/blueprint`, and every command in this guide
+   works there too.
+
+Good to know when you change code:
+- The pipeline service keeps running the version it started with.
+  After saving a change, restart it (section 9, "Restart a service").
+- To run the tests after a change: `uv run pytest` in the terminal.
+- Don't start a second copy of the service from VS Code's Run button
+  while the background service is running; both would want port 8080.
 
 ---
 
@@ -673,6 +753,10 @@ need with `ollama rm <model-name>`.
 
 ## 11. Final checklist
 
+- [ ] `git --version` prints a version number
+- [ ] `cd ~/blueprint && uv run python --version` prints `Python 3.12.x`
+- [ ] The setup script's step 8 printed versions for pandas, DuckDB,
+      pdfplumber, PyMuPDF and FastAPI
 - [ ] `ollama --version` prints a version number
 - [ ] `ps aux | grep "[o]llama serve"` shows a path with `/opt/homebrew/`,
       not `docker`
