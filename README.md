@@ -10,7 +10,8 @@ connection is used only to download and update software and models.
 
 **To install it, follow [`SETUP.md`](SETUP.md).** It is written for
 someone with no Terminal experience and goes from an unknown Mac to a
-tested, working system.
+tested, working system. **To give colleagues access** from their own
+computers, see [`ACCESS.md`](ACCESS.md).
 
 This README explains how the system works and why each part is built the
 way it is, so you can maintain and extend it. [`OPUS_FIXES.md`](OPUS_FIXES.md)
@@ -83,7 +84,9 @@ There is no tool-call parser anywhere in the path.
 blueprint/
   README.md               this file: how it works and why
   SETUP.md                step-by-step installation, for non-technical readers
+  ACCESS.md               giving colleagues access: link, accounts, fixed address
   OPUS_FIXES.md           review findings and what was fixed
+  .python-version         the Python version uv installs (3.12)
   pyproject.toml          Python dependencies, managed with uv
   .env.example            settings template; setup copies it to .env
   src/

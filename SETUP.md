@@ -181,6 +181,20 @@ Note which of these is true: it runs in Docker (first command printed a
 line), it's installed natively (second command printed a path), or it's
 not installed.
 
+If the page works but neither of the first two commands printed
+anything, find out which program is serving it:
+```bash
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+```
+Look at the first column (`COMMAND`):
+- `com.docke`, `vpnkit` or anything with `docker`: it runs in **Docker**
+  (Docker Desktop may simply not have been started in 1.3; start it and
+  repeat 1.3 to get the container name).
+- `python`, `python3` or `open-webui`: it's a **native** install.
+- anything else: write the name down and treat it as "installed some
+  other way". Keep it running as it is, skip section 5, and continue
+  with section 6.
+
 ### 1.6 Which models are already downloaded?
 ```bash
 ollama list
@@ -312,8 +326,9 @@ git clone https://github.com/Mirza-Adnan-Baig/blueprint.git
 cd blueprint
 ```
 This creates a folder called `blueprint` in your home folder and moves
-into it. If git says the folder `already exists`, the project is already
-there; update it instead:
+into it. The project on GitHub is public, so no GitHub account or login
+is needed. If git says the folder `already exists`, the project is
+already there; update it instead:
 ```bash
 cd ~/blueprint
 git pull
@@ -344,6 +359,13 @@ internet connection.
 
 When it's finished it prints `All done`. If it prints `STOPPED:`
 instead, read the line after it and go to section 10.
+
+**macOS notifications you will see while it runs:** "Background Items
+Added" (sometimes mentioning `ollama`, `uvicorn`, `python` or `bash`).
+That's expected: it's the background services being set up. **Don't
+switch them off.** If you ever open System Settings → General → Login
+Items & Extensions, the entries under "Allow in the Background" for these
+programs must stay on, or the services won't start after the next login.
 
 The script is safe to run again at any time. It skips what's already
 done and restarts the services.
@@ -570,6 +592,15 @@ In the Functions list, click the gear icon next to Document Intelligence.
 
 Click **Save**.
 
+**Only if Open WebUI runs in Docker:** check that it can reach the
+pipeline service on the Mac:
+```bash
+docker exec open-webui curl -s http://host.docker.internal:8080/health
+```
+(Use your container name instead of `open-webui` if it's different.)
+It should print `{"status":"ok"}`. If it prints nothing or an error, see
+"Open WebUI in Docker can't reach the pipeline" in section 10.
+
 ### 6.3 Let staff see it, and switch off File Context
 A new function is **only visible to admins** until you change this.
 1. Admin Panel → **Settings** → **Models**. Find **Document
@@ -591,6 +622,8 @@ it to your Desktop:
 ```bash
 cp ~/blueprint/samples/lager_beispiel.csv ~/Desktop/
 ```
+If macOS asks whether **Terminal may access files in your Desktop
+folder**, click **Allow**.
 1. In Open WebUI, start a **New Chat**.
 2. At the top, choose **Document Intelligence** as the model.
 3. Click the **+** or paperclip icon in the message box, choose
@@ -611,6 +644,11 @@ question after a restart can take a minute or two while the model loads.
 Follow-up questions in the same chat don't need the file attached again.
 
 If an answer is wrong or doesn't come, go to section 10.
+
+### 6.5 Give colleagues access
+How staff reach Open WebUI from their own computers, how to create their
+accounts, and how to keep the address from changing is all in
+[`ACCESS.md`](ACCESS.md).
 
 ---
 
@@ -739,6 +777,7 @@ need with `ollama rm <model-name>`.
 | The setup script prints `STOPPED: some tests failed` | Copy the Terminal output into a message to whoever maintains this project. Don't continue. |
 | The setup script stops during the model download | Usually the internet connection dropped. Run the script again; it continues where it stopped. |
 | Open WebUI says "Der Dokumenten-Dienst ist gerade nicht erreichbar" | The pipeline isn't running. Run `curl http://127.0.0.1:8080/health`. If that fails, restart it (section 9) and look at `logs/service.log`. If Open WebUI runs in Docker, check that `API_BASE` is `http://host.docker.internal:8080` (6.2). |
+| Open WebUI in Docker can't reach the pipeline (the check in 6.2 fails, but `curl http://127.0.0.1:8080/health` on the Mac works) | Let the pipeline listen on the whole network instead of only the Mac itself: run `sed -i '' 's#<string>127.0.0.1</string>#<string>0.0.0.0</string>#' ~/Library/LaunchAgents/com.docintel.pipeline.plist`, then `launchctl bootout gui/$(id -u)/com.docintel.pipeline` and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.docintel.pipeline.plist`, and repeat the check in 6.2. Note: the pipeline service has no password, so after this any computer in the office network could send it questions directly. Only do this on a trusted office network, and note that re-running the setup script switches it back. |
 | "Bitte laden Sie zuerst ein Dokument hoch" | No document in this chat yet, or it was deleted after 24 hours. Attach the file again. |
 | Staff can't see "Document Intelligence" | Set its visibility to Public (6.3). |
 | An answer takes several minutes | Normal for scanned PDFs: every page is read by the vision model. Watch the status line. Excel, CSV and normal PDFs should take under a minute. |
@@ -747,6 +786,7 @@ need with `ollama rm <model-name>`.
 | The Mac feels frozen or very slow | Open Activity Monitor → Memory. If "Memory Pressure" is red, too much is loaded: restart Ollama (section 9). |
 | `command not found: brew` | Close Terminal, open a new window. If it's still missing, repeat 3.4. |
 | `command not found: uv` | Run `source $HOME/.local/bin/env`, or open a new Terminal window. |
+| After a reboot, Ollama or the pipeline doesn't run although it worked before | Check System Settings → General → Login Items & Extensions → "Allow in the Background": the entries for `ollama`, `uvicorn`, `python` and `bash` must be on. Then run `bash scripts/setup_mac.sh` again from `~/blueprint`. |
 | Anything else | Restart everything by running `bash scripts/setup_mac.sh` again from `~/blueprint`. It is safe to repeat. |
 
 ---
