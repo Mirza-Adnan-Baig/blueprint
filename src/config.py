@@ -37,7 +37,16 @@ LOG_FILE = _path("LOG_FILE", "logs/pipeline.log")
 
 SANDBOX_TIMEOUT_SECONDS = int(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "30"))
 SANDBOX_MEMORY_LIMIT_GB = float(os.environ.get("SANDBOX_MEMORY_LIMIT_GB", "8"))
+SANDBOX_MAX_CONCURRENT = int(os.environ.get("SANDBOX_MAX_CONCURRENT", "1"))
 DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "6GB")
+
+# How many result rows reach the answer-phrasing prompt (the full count is
+# always reported alongside, so the model knows when it sees only a part).
+MAX_RESULT_ROWS = int(os.environ.get("MAX_RESULT_ROWS", "200"))
+
+# How to read a number like "1.234" when a column gives no other clue:
+# "german" -> 1234 (thousands dot), "us" -> 1.234 (decimal point).
+NUMBER_FORMAT_DEFAULT = os.environ.get("NUMBER_FORMAT_DEFAULT", "german").lower()
 
 GC_MAX_AGE_HOURS = float(os.environ.get("GC_MAX_AGE_HOURS", "24"))
 

@@ -18,23 +18,37 @@ Five layers:
   3. A separate subprocess -- a crash or hang cannot take down the API.
   4. A hard wall-clock timeout, enforced by killing the subprocess.
   5. A hard memory cap, enforced by a watchdog in THIS process that
-     measures the subprocess's real resident memory and kills it the
-     moment it crosses the limit.
+     measures the subprocess's real memory use and kills it the moment it
+     crosses the limit.
+
+On top of that, only SANDBOX_MAX_CONCURRENT sandboxes (default 1) run at
+the same time, so several people asking at once can't add up to more
+memory than the Mac has. Later requests wait their turn.
 
 Why a watchdog and not `resource.setrlimit(RLIMIT_AS, ...)`: on macOS the
 kernel does not enforce RLIMIT_AS, and Python's `resource.setrlimit` has a
 known macOS bug where it raises ValueError instead (CPython issue #78783).
-It would look like protection on the Mac Studio while providing none. The
-watchdog measures actual memory use, so it works the same on every OS.
+It would look like protection on the Mac Studio while providing none.
+
+Why "physical footprint" on macOS: when memory gets tight, macOS compresses
+a process's pages, and compressed pages no longer count as resident (RSS).
+A runaway process can then use far more than the limit while its RSS stays
+low. The footprint (what Activity Monitor shows as "Memory") includes the
+compressed part. It is read through libproc; the first reading is checked
+against psutil's RSS, and if the two disagree the watchdog falls back to
+RSS rather than trust a wrong number.
 """
 
 from __future__ import annotations
 
 import ast
+import ctypes
 import json
+import logging
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +58,8 @@ import psutil
 import config
 from data_layer import db_path
 
+logger = logging.getLogger("pipeline")
+
 # The wrapper already provides pd, np and `con`; these are the only extra
 # modules generated code may import. Deliberately excludes `duckdb` (use
 # `con`), and `resource`/`os`/`sys`/`subprocess` (process control).
@@ -51,16 +67,27 @@ ALLOWED_IMPORTS = {"pandas", "numpy", "statistics", "math", "json", "datetime", 
 
 BLOCKED_CALL_NAMES = {
     "open", "exec", "eval", "compile", "__import__", "input", "globals", "locals", "vars",
-    "getattr", "setattr", "delattr",
-    "read_csv", "read_excel", "read_json", "read_parquet", "read_sql", "read_pickle", "read_html",
-    "to_csv", "to_excel", "to_json", "to_parquet", "to_sql", "to_pickle",
+    "getattr", "setattr", "delattr", "breakpoint",
     "system", "popen", "remove", "rmdir", "unlink", "rename", "chmod",
     "connect", "install_extension", "load_extension",
+    # numpy file access
+    "save", "savez", "savez_compressed", "load", "loadtxt", "savetxt", "genfromtxt",
+    "fromfile", "tofile", "memmap", "fromregex", "DataSource",
+}
+
+# Every pandas/numpy/DuckDB call starting with read_ reads a file, and most
+# starting with to_ write one. These to_ calls only convert data in memory.
+ALLOWED_TO_CALLS = {
+    "to_dict", "to_list", "to_frame", "to_numpy", "to_string", "to_markdown", "to_records",
+    "to_datetime", "to_numeric", "to_timedelta", "to_period", "to_timestamp", "to_pydatetime",
+    "to_series", "to_flat_index", "to_df", "to_arrow_table",
 }
 
 BLOCKED_NAMES = {"duckdb", "__builtins__"}
 
 POLL_INTERVAL_SECONDS = 0.1
+
+_slots = threading.BoundedSemaphore(max(1, config.SANDBOX_MAX_CONCURRENT))
 
 
 @dataclass
@@ -93,8 +120,14 @@ def validate_code(code: str) -> None:
         elif isinstance(node, ast.Call):
             func = node.func
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-            if name in BLOCKED_CALL_NAMES:
-                raise UnsafeCodeError(f"call not allowed: {name}")
+            if not name:
+                continue
+            if (
+                name in BLOCKED_CALL_NAMES
+                or name.startswith("read_")
+                or (name.startswith("to_") and name not in ALLOWED_TO_CALLS)
+            ):
+                raise UnsafeCodeError(f"call not allowed: {name} (no file access; query through `con`)")
         elif isinstance(node, ast.Name) and node.id in BLOCKED_NAMES:
             raise UnsafeCodeError(f"use `con` for queries, not `{node.id}` directly")
         elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
@@ -118,22 +151,110 @@ del duckdb
 
 {user_code}
 
+__MAX_ROWS = {max_rows}
+
+
+def __table(frame):
+    if not isinstance(frame.index, pd.RangeIndex):
+        frame = frame.reset_index()
+    total = len(frame)
+    head = frame.head(__MAX_ROWS)
+    try:
+        rows = json.loads(head.to_json(orient="records", date_format="iso", force_ascii=False))
+    except ValueError:
+        rows = {{"columns": [str(c) for c in head.columns], "rows": head.astype(str).values.tolist()}}
+    if total > __MAX_ROWS:
+        return {{"first_rows": rows, "total_rows": total,
+                "note": f"only the first {{__MAX_ROWS}} of {{total}} rows are shown"}}
+    return rows
+
+
+def __jsonable(value):
+    if isinstance(value, pd.Series):
+        value = value.to_frame(name=str(value.name) if value.name is not None else "value")
+    if isinstance(value, pd.DataFrame):
+        return __table(value)
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (list, tuple)) and len(value) > __MAX_ROWS:
+        return {{"first_items": list(value[:__MAX_ROWS]), "total_items": len(value)}}
+    return value
+
+
 try:
-    payload = result.to_dict(orient="records") if isinstance(result, pd.DataFrame) else result
+    payload = __jsonable(result)
 except NameError:
     raise SystemExit("generated code never assigned a `result` variable")
 
 print("__SANDBOX_RESULT_START__")
-print(json.dumps(payload, default=str))
+print(json.dumps(payload, default=str, ensure_ascii=False))
 print("__SANDBOX_RESULT_END__")
 """
 
 
-def _tree_rss_bytes(proc: psutil.Process) -> int:
+class _RusageInfoV0(ctypes.Structure):
+    # struct rusage_info_v0 from <sys/resource.h>
+    _fields_ = [
+        ("ri_uuid", ctypes.c_uint8 * 16),
+        ("ri_user_time", ctypes.c_uint64),
+        ("ri_system_time", ctypes.c_uint64),
+        ("ri_pkg_idle_wkups", ctypes.c_uint64),
+        ("ri_interrupt_wkups", ctypes.c_uint64),
+        ("ri_pageins", ctypes.c_uint64),
+        ("ri_wired_size", ctypes.c_uint64),
+        ("ri_resident_size", ctypes.c_uint64),
+        ("ri_phys_footprint", ctypes.c_uint64),
+        ("ri_proc_start_abstime", ctypes.c_uint64),
+        ("ri_proc_exit_abstime", ctypes.c_uint64),
+    ]
+
+
+_libsystem = None
+_footprint_trusted: bool | None = None
+
+
+def _darwin_footprint(pid: int, rss: int) -> int | None:
+    global _libsystem, _footprint_trusted
+    if _footprint_trusted is False:
+        return None
+    try:
+        if _libsystem is None:
+            _libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            _libsystem.proc_pid_rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+            _libsystem.proc_pid_rusage.restype = ctypes.c_int
+        info = _RusageInfoV0()
+        if _libsystem.proc_pid_rusage(pid, 0, ctypes.byref(info)) != 0:
+            return None
+    except (OSError, AttributeError):
+        _footprint_trusted = False
+        logger.warning("macOS footprint unavailable, memory watchdog uses RSS")
+        return None
+
+    if _footprint_trusted is None:
+        ratio = info.ri_resident_size / rss if rss else 0
+        _footprint_trusted = 0.5 <= ratio <= 2.0
+        if not _footprint_trusted:
+            logger.warning("macOS footprint reading failed its self-check, memory watchdog uses RSS")
+            return None
+    return info.ri_phys_footprint
+
+
+def _process_memory_bytes(p: psutil.Process) -> int:
+    rss = p.memory_info().rss
+    if sys.platform == "darwin":
+        footprint = _darwin_footprint(p.pid, rss)
+        if footprint is not None:
+            return max(rss, footprint)
+    return rss
+
+
+def _tree_memory_bytes(proc: psutil.Process) -> int:
     total = 0
     for p in [proc, *proc.children(recursive=True)]:
         try:
-            total += p.memory_info().rss
+            total += _process_memory_bytes(p)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     return total
@@ -165,6 +286,11 @@ def run_generated_code(
     if not path.exists():
         return SandboxResult(success=False, error=f"no ingested data for doc_id={doc_id}")
 
+    with _slots:
+        return _run(path, code, timeout_seconds, memory_limit_bytes)
+
+
+def _run(path: Path, code: str, timeout_seconds: float, memory_limit_bytes: int) -> SandboxResult:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         script_path = tmp_path / "run.py"
@@ -174,6 +300,7 @@ def run_generated_code(
                 duckdb_memory_limit=config.DUCKDB_MEMORY_LIMIT,
                 temp_dir=str(tmp_path / "spill"),
                 user_code=code,
+                max_rows=config.MAX_RESULT_ROWS,
             ),
             encoding="utf-8",
         )
@@ -190,12 +317,12 @@ def run_generated_code(
             killed_reason = None
 
             while popen.poll() is None:
-                rss = _tree_rss_bytes(proc)
-                peak = max(peak, rss)
-                if rss > memory_limit_bytes:
+                used = _tree_memory_bytes(proc)
+                peak = max(peak, used)
+                if used > memory_limit_bytes:
                     killed_reason = (
-                        f"used more than {memory_limit_bytes / 1024**3:.1f} GB of memory and was killed "
-                        f"-- aggregate in SQL via `con` instead of loading everything into pandas"
+                        f"used more than {memory_limit_bytes / 1024**3:.1f} GB of memory and was killed; "
+                        f"aggregate in SQL via `con` instead of loading everything into pandas"
                     )
                 elif time.monotonic() - started > timeout_seconds:
                     killed_reason = f"execution exceeded {timeout_seconds:g}s and was killed"

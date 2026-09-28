@@ -1,6 +1,6 @@
 [project]
 name = "docintel-pipeline"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local document intelligence pipeline: upload a document, get calculated answers."
 requires-python = ">=3.11"
 dependencies = [
@@ -22,4 +22,5 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    "httpx>=0.27",
 ]
