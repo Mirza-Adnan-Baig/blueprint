@@ -192,8 +192,8 @@ Look at the first column (`COMMAND`):
   repeat 1.3 to get the container name).
 - `python`, `python3` or `open-webui`: it's a **native** install.
 - anything else: write the name down and treat it as "installed some
-  other way". Keep it running as it is, skip section 5, and continue
-  with section 6.
+  other way". Keep it running as it is. In section 5, skip options A and
+  B, but do "Settings inside Open WebUI".
 
 ### 1.6 Which models are already downloaded?
 ```bash
@@ -432,14 +432,23 @@ Good to know when you change code:
 
 ## 5. Open WebUI
 
-Whichever option applies, Open WebUI gets these settings so that nothing
-leaves the Mac:
+Do option A **or** option B (whichever fits what you found in section 1),
+then always do **"Settings inside Open WebUI"** at the end of this
+section. Skip options A and B if Open WebUI was "installed some other
+way" (1.5), but still do the settings at the end.
+
+Options A and B start Open WebUI with these settings:
 
 | Setting | Value | Effect |
 |---|---|---|
 | `ENABLE_OPENAI_API` | `false` | Removes the built-in connection to OpenAI's cloud, so no chat can go to a cloud model by accident. |
 | `SCARF_NO_ANALYTICS`, `DO_NOT_TRACK` | `true` | No usage statistics are sent. |
 | `ANONYMIZED_TELEMETRY` | `false` | No telemetry from the built-in search database. |
+
+Open WebUI only uses some of these on its **very first start**; after
+that it keeps its own saved values. An Open WebUI that was already in use
+ignores them for the connections, which is why the last part of this
+section sets the connections by hand in the Admin Panel.
 
 ### Option A: install Open WebUI natively
 Use this if Open WebUI is not installed yet. (If it runs in Docker and
@@ -450,7 +459,7 @@ you'd rather keep it there, use option B instead.)
    ```bash
    source $HOME/.local/bin/env
    ```
-2. Install Open WebUI (a few minutes):
+2. Install Open WebUI (a large download of a few GB; 5 to 15 minutes):
    ```bash
    uv tool install --python 3.11 open-webui
    ```
@@ -542,13 +551,31 @@ they live in a separate storage area (a "volume") that is reused.
    `host.docker.internal`, and why the Pipe's address in section 6.2 is
    different for Docker.
 
-### Check Open WebUI (both options)
+### Settings inside Open WebUI (always do this, whatever option applies)
 1. Open `http://localhost:3000` in Safari on the Mac and sign in with the
    admin account.
 2. Click your name (bottom left) → **Admin Panel** → **Settings** →
-   **Connections**. The Ollama connection should be listed and work (a
-   green tick or no error). There should be no OpenAI connection.
-3. From another computer in the office, open `http://<mac-ip>:3000`. To
+   **Connections**:
+   - **OpenAI API:** switch it **off**.
+   - **Ollama API:** the address must be
+     `http://127.0.0.1:11434` if Open WebUI was installed natively
+     (option A), or `http://host.docker.internal:11434` if it runs in
+     Docker (option B). If it shows something else (for example
+     `http://ollama:11434` from an old Docker setup), click the gear or
+     pencil next to it and correct it. Then click the small circular
+     arrow (verify) next to it: it should say the connection is verified.
+   - Click **Save**.
+3. Still in **Settings**, open **Documents** and switch **on** **Bypass
+   Embedding and Retrieval**, then click **Save**.
+   This one matters for scanned PDFs. Without it, Open WebUI tries to
+   index every uploaded file itself, finds no text in a scan, and
+   **rejects the upload** with "The content provided is empty" before
+   the pipeline ever sees it (this was tested). It also makes uploads
+   faster. It affects all models in Open WebUI, which is fine because
+   staff should only use Document Intelligence (ACCESS.md, section 5).
+4. Start a new chat, pick any model that was already there, and type
+   "Hallo" to check Open WebUI can talk to Ollama.
+5. From another computer in the office, open `http://<mac-ip>:3000`. To
    find the Mac's IP address:
    ```bash
    ipconfig getifaddr en0
@@ -610,7 +637,8 @@ A new function is **only visible to admins** until you change this.
 3. Under **Capabilities**, untick **File Context** if you see that
    option. This stops Open WebUI from also running its own (inaccurate)
    document search on every upload. The pipeline works either way, but
-   it's faster with it off. Leave **File Upload** ticked.
+   it's faster with it off. Leave **File Upload** and **Vision** ticked
+   (without Vision, Open WebUI refuses photos and image scans).
 4. Click **Save**.
 5. To check: sign in as a normal (non-admin) user and make sure
    "Document Intelligence" appears in the model list at the top of a new
@@ -676,6 +704,12 @@ ollama ps
 It must show **only** `qwen2.5-coder:32b`. The vision model is unloaded
 as soon as a document has been read, because both models don't fit in
 memory together.
+
+Finally, test a **photo**: take a phone photo of a printed table (or use
+any JPG or PNG of one), attach it in a new chat with Document
+Intelligence, and ask for a total. Pictures travel through Open WebUI
+differently from documents, so this checks that path too. The status
+line should say "Dokument wird eingelesen: bild_1.jpg" (or `.png`).
 
 ---
 
@@ -779,6 +813,10 @@ need with `ollama rm <model-name>`.
 | Open WebUI says "Der Dokumenten-Dienst ist gerade nicht erreichbar" | The pipeline isn't running. Run `curl http://127.0.0.1:8080/health`. If that fails, restart it (section 9) and look at `logs/service.log`. If Open WebUI runs in Docker, check that `API_BASE` is `http://host.docker.internal:8080` (6.2). |
 | Open WebUI in Docker can't reach the pipeline (the check in 6.2 fails, but `curl http://127.0.0.1:8080/health` on the Mac works) | Let the pipeline listen on the whole network instead of only the Mac itself: run `sed -i '' 's#<string>127.0.0.1</string>#<string>0.0.0.0</string>#' ~/Library/LaunchAgents/com.docintel.pipeline.plist`, then `launchctl bootout gui/$(id -u)/com.docintel.pipeline` and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.docintel.pipeline.plist`, and repeat the check in 6.2. Note: the pipeline service has no password, so after this any computer in the office network could send it questions directly. Only do this on a trusted office network, and note that re-running the setup script switches it back. |
 | "Bitte laden Sie zuerst ein Dokument hoch" | No document in this chat yet, or it was deleted after 24 hours. Attach the file again. |
+| Uploading a scanned PDF shows an error, or "The content provided is empty" | Switch on **Bypass Embedding and Retrieval** (section 5, "Settings inside Open WebUI", step 3), then attach the file again. |
+| Open WebUI shows no models, or an Ollama connection error | Check the Ollama address in Admin Panel → Settings → Connections (section 5, "Settings inside Open WebUI", step 2) and that `curl http://127.0.0.1:11434` on the Mac says `Ollama is running`. |
+| A chat answers without the status line "Dokument wird eingelesen", or answers questions about the document with made-up numbers | The chat is not using **Document Intelligence**. Pick it at the top of a new chat, and hide the other models from staff (ACCESS.md, section 5). |
+| Attaching a photo shows "the model does not support images" | Admin Panel → Settings → Models → Document Intelligence (pencil) → Capabilities: tick **Vision**, save. |
 | Staff can't see "Document Intelligence" | Set its visibility to Public (6.3). |
 | An answer takes several minutes | Normal for scanned PDFs: every page is read by the vision model. Watch the status line. Excel, CSV and normal PDFs should take under a minute. |
 | An answer looks wrong | Open `logs/pipeline.log` (section 9) and find the question. Below it, under `code used:`, is the exact calculation, and under `result:` the number it produced. If a number column was read wrongly, note the file and the column. |
@@ -805,9 +843,13 @@ need with `ollama rm <model-name>`.
 - [ ] `launchctl list | grep com.docintel` shows `ollama`, `pipeline` and
       `gc` (and `openwebui` if installed natively)
 - [ ] Open WebUI opens at `http://<mac-ip>:3000` from another computer
+- [ ] Admin Panel → Settings → Connections: OpenAI off, Ollama address
+      correct and verified; Documents: **Bypass Embedding and Retrieval**
+      on (section 5)
 - [ ] "Document Intelligence" is switched on, visible to normal users,
       and `API_BASE` is right for your setup (6.2)
 - [ ] The sample file gives all four expected answers (6.4)
 - [ ] After a scanned PDF, `ollama ps` shows only `qwen2.5-coder:32b` (7)
+- [ ] A photo of a table gets an answer (7)
 - [ ] Energy and login settings done (8), and everything came back after
       one test reboot

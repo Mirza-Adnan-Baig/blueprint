@@ -53,6 +53,10 @@ from german import convert_dataframe_numbers, looks_like_identifier
 logger = logging.getLogger("pipeline")
 
 MIN_TEXT_CHARS_PER_PAGE = 40
+# A short page counts as a scan only if images cover at least this share
+# of it. A cover page with a small logo and a title is not a scan, and
+# reading it would load the 21 GB vision model for nothing.
+MIN_IMAGE_COVERAGE_FOR_SCAN = 0.3
 # A page with no text and no embedded image is only treated as a scan when
 # it is drawn from many vector shapes (text converted to outlines).
 MIN_VECTOR_OBJECTS_FOR_SCAN = 50
@@ -60,7 +64,7 @@ MIN_VECTOR_OBJECTS_FOR_SCAN = 50
 SPREADSHEET_SUFFIXES = {".xlsx", ".xls"}
 CSV_SUFFIXES = {".csv"}
 PDF_SUFFIXES = {".pdf"}
-IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
 
 VISION_PROMPT = (
     "Transcribe this document page completely. If it contains a table, "
@@ -328,7 +332,12 @@ def _merge_page_tables(found: list[tuple[int, int, list[list]]]) -> dict[str, pd
 def _page_is_scan(page, text: str) -> bool:
     if len(text.strip()) >= MIN_TEXT_CHARS_PER_PAGE:
         return False
-    if page.images:
+    page_area = float(page.width * page.height) or 1.0
+    image_area = sum(
+        max(0.0, float(img["x1"] - img["x0"])) * max(0.0, float(img["bottom"] - img["top"]))
+        for img in page.images
+    )
+    if image_area / page_area >= MIN_IMAGE_COVERAGE_FOR_SCAN:
         return True
     vector_objects = len(page.curves) + len(page.rects) + len(page.lines)
     return not page.chars and vector_objects >= MIN_VECTOR_OBJECTS_FOR_SCAN
@@ -379,8 +388,22 @@ def _ingest_pdf(path: Path, vision: VisionSession) -> IngestResult:
     )
 
 
+def _as_png(image_bytes: bytes) -> bytes:
+    """The vision model reliably reads PNG and JPEG; WebP, GIF, TIFF and BMP
+    are converted to PNG first."""
+    if image_bytes[:3] == b"\xff\xd8\xff" or image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        return image_bytes
+    try:
+        pix = pymupdf.Pixmap(image_bytes)
+        if pix.n - pix.alpha >= 4:  # CMYK, which PNG can't hold
+            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+        return pix.tobytes("png")
+    except Exception:
+        return image_bytes
+
+
 def _ingest_image(path: Path, vision: VisionSession) -> IngestResult:
-    description = vision.describe(path.read_bytes())
+    description = vision.describe(_as_png(path.read_bytes()))
     found = [(1, i, rows) for i, rows in enumerate(_markdown_tables(description))]
     return IngestResult(
         source_type="image",

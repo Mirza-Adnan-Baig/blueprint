@@ -59,7 +59,7 @@ There is no tool-call parser anywhere in the path.
         |
         v
  openwebui/pipe_function.py   (pasted into Admin Panel -> Functions)
-        |   POST /ingest (file, file id, chat id)   POST /query (question, chat id)
+        |   POST /ingest (file, fingerprint, chat id)   POST /query (question, chat id)
         v
  src/pipeline_api.py   (FastAPI service, 127.0.0.1:8080)
         |                                              |
@@ -136,8 +136,9 @@ works the same whatever the original file type was.
 | `.csv` | pandas | **Never** |
 | PDF page with a table | pdfplumber | **Never**, however little text the page has |
 | PDF page with normal text | pdfplumber | **Never** |
-| PDF page with under 40 characters of text **and** an image on it (a scan) | `qwen2.5vl:32b` | Yes, that page only |
-| `.png`, `.jpg`, `.tiff`, ... | `qwen2.5vl:32b` | Yes |
+| PDF page with under 40 characters of text **and** images covering at least 30% of it (a scan) | `qwen2.5vl:32b` | Yes, that page only |
+| PDF page with a small logo and a short title (a cover page) | pdfplumber | **Never** |
+| `.png`, `.jpg`, `.tiff`, `.webp`, `.gif`, ... | `qwen2.5vl:32b` (non-PNG/JPEG converted to PNG first) | Yes |
 
 pandas and pdfplumber read the exact characters stored in the file. A
 vision model reads numbers by *looking at pixels*: good, but never exact.
@@ -339,8 +340,9 @@ shown.
 
 - **`POST /ingest`** (a file, plus optional `source_id` and `chat_id`):
   reads the file, loads it into DuckDB, returns a `doc_id` and the schema
-  summary. If this exact Open WebUI file (`source_id`) was read before,
-  the stored result is returned at once (`"cached": true`).
+  summary. The Pipe sends the SHA-256 fingerprint of the file's content
+  as `source_id`; if that content was read before, the stored result is
+  returned at once (`"cached": true`).
 - **`POST /query?question=...&chat_id=...`** (or `&doc_id=...`):
   1. Sends the schema summary and the question to `qwen2.5-coder:32b`.
   2. Runs the returned code block in the sandbox.
@@ -350,8 +352,8 @@ shown.
      forbidden from inventing or recalculating any number.
 - **`GET /health`**: `{"status": "ok"}` when the service is up.
 
-**Registry** (`storage/duckdb/registry.json`): remembers which Open
-WebUI file became which document, and which document each chat is
+**Registry** (`storage/duckdb/registry.json`): remembers which file
+content became which document, and which document each chat is
 about. So a file is never read twice, follow-up questions without a new
 attachment still find their document, and both survive restarts. The
 cleanup job removes entries whose data it deleted.
@@ -409,6 +411,21 @@ Installation is in SETUP.md section 6. How the Pipe works, and why:
   excerpts in front of the question, ending with `</context>`; older
   versions use `<user_query>` tags; the native tool mode adds
   `<attached_files>`. All three are removed.
+- **Pictures are taken from the message.** Open WebUI does not pass a
+  JPG or PNG as a file: it embeds it in the user's message as a
+  `data:image/...` URL (and may list it in `__files__` as type
+  `image`). The Pipe decodes those and sends them to `/ingest` like a
+  file. Every attachment is identified by a SHA-256 fingerprint of its
+  content, so the same file or picture is read only once.
+- **Scanned PDFs need "Bypass Embedding and Retrieval"** switched on in
+  Open WebUI (SETUP.md section 5). Otherwise Open WebUI indexes every
+  upload itself, finds no text in a scan, and rejects the upload ("The
+  content provided is empty") before the Pipe sees it. This was
+  reproduced against Open WebUI 0.11.
+- **Connection settings are set in the Admin Panel.** Open WebUI saves
+  `ENABLE_OPENAI_API` and the Ollama address in its database on first
+  start and ignores the environment variables afterwards, so an
+  existing installation has to be changed in the UI.
 - **Open WebUI's background jobs** (chat title, tags, search queries,
   follow-up suggestions) are sent to whichever model the chat uses, this
   Pipe included. They get an instant empty reply instead of a

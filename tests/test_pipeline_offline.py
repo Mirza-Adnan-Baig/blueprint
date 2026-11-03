@@ -6,6 +6,8 @@ The model actually writing code is checked by hand (SETUP.md section 7).
 """
 
 import asyncio
+import base64
+import hashlib
 import json
 
 import numpy as np
@@ -70,7 +72,7 @@ def _scanned_pdf(path, pages=1):
     pix.clear_with(200)
     with pymupdf.open() as doc:
         for _ in range(pages):
-            doc.new_page().insert_image(pymupdf.Rect(50, 50, 300, 300), pixmap=pix)
+            doc.new_page().insert_image(pymupdf.Rect(30, 30, 565, 810), pixmap=pix)
         doc.save(path)
 
 
@@ -183,6 +185,25 @@ def test_text_pdf_never_uses_vision(tmp_path, fake_ollama):
         doc.save(pdf_path)
     assert ingest_file(pdf_path).source_type == "pdf_text"
     assert fake_ollama.calls == []
+
+
+def test_cover_page_with_small_logo_is_not_a_scan(tmp_path, fake_ollama):
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20), 0)
+    pix.clear_with(90)
+    pdf_path = tmp_path / "cover.pdf"
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        page.insert_image(pymupdf.Rect(40, 40, 120, 90), pixmap=pix)  # small logo
+        page.insert_text((72, 200), "Inventur 2026")
+        doc.save(pdf_path)
+    ingest_file(pdf_path)
+    assert fake_ollama.vision_calls() == []
+
+
+def test_non_png_pictures_are_converted_for_the_vision_model():
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 10, 10), 0)
+    pix.clear_with(120)
+    assert smart_router._as_png(pix.tobytes("ppm"))[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_short_table_page_never_uses_vision(tmp_path, fake_ollama):
@@ -521,10 +542,52 @@ def test_pipe_reads_files_and_chat_id_from_open_webui_arguments(tmp_path, monkey
     ))
 
     assert answer == "Ein Teil."
-    assert sent[0]["data"] == {"source_id": "abc123", "chat_id": "chat-9"}
+    fingerprint = hashlib.sha256(upload.read_bytes()).hexdigest()
+    assert sent[0]["data"] == {"source_id": fingerprint, "chat_id": "chat-9"}
     assert sent[1]["params"] == {"question": "Wie viele?", "doc_id": "d1", "chat_id": "chat-9"}
     assert sent[0]["timeout"] >= 3600
     assert events[-1]["data"]["done"] is True
+
+
+def test_pipe_reads_pictures_embedded_in_the_message(monkeypatch):
+    # Open WebUI passes a JPG/PNG as a data URL inside the message, and may
+    # list the same picture in __files__ as type "image". Read it once.
+    import pipe_function
+
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 10, 10), 0)
+    png = pix.tobytes("png")
+    data_url = "data:image/png;base64," + base64.b64encode(png).decode()
+    sent = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.payload
+
+    def fake_post(url, files=None, data=None, params=None, timeout=None):
+        sent.append({"url": url, "files": files, "data": data})
+        return FakeResponse({"doc_id": "img1"} if url.endswith("/ingest") else {"answer": "ok"})
+
+    monkeypatch.setattr(pipe_function.requests, "post", fake_post)
+    body = {"messages": [{"role": "user", "content": [
+        {"type": "text", "text": "Was steht auf dem Foto?"},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]}]}
+    files = [{"type": "image", "url": data_url}]
+    answer = asyncio.run(pipe_function.Pipe().pipe(body, __files__=files, __chat_id__="c1"))
+
+    ingests = [s for s in sent if s["url"].endswith("/ingest")]
+    assert answer == "ok"
+    assert len(ingests) == 1
+    assert ingests[0]["files"]["file"] == ("bild_1.png", png)
+    assert ingests[0]["data"]["source_id"] == hashlib.sha256(png).hexdigest()
 
 
 def test_pipe_without_any_document_says_so(monkeypatch):

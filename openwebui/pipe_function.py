@@ -25,14 +25,18 @@ How it works, and why it is written this way:
 - It never uses Open WebUI's or Ollama's native tool-calling. The model
   picked in the chat is not what answers; the pipeline service calls its
   own code model directly.
-- A file already read is never read again: the service remembers each
-  Open WebUI file id, and remembers which document each chat is about,
-  so follow-up questions without a new attachment still work, even after
-  a restart.
+- Pictures (JPG, PNG, ...) are not passed as files: Open WebUI embeds
+  them in the message as data URLs. They are taken from there.
+- A file already read is never read again: it is recognised by its
+  content (a SHA-256 fingerprint), and the service remembers which
+  document each chat is about, so follow-up questions without a new
+  attachment still work, even after a restart.
 """
 
 import asyncio
+import base64
 import glob
+import hashlib
 import os
 import re
 import time
@@ -107,15 +111,50 @@ _TASK_TITLES = {"de": "Dokumentenfrage", "en": "Document question"}
 
 
 def file_ref(entry: dict) -> dict | None:
-    """id, file name and disk path of one entry in `__files__`."""
-    if entry.get("type") not in (None, "file"):
+    """id, file name and disk path of one uploaded file in `__files__`."""
+    if entry.get("type") not in (None, "file", "image"):
         return None
     info = entry.get("file") if isinstance(entry.get("file"), dict) else {}
     file_id = info.get("id") or entry.get("id")
     name = info.get("filename") or entry.get("name") or (info.get("meta") or {}).get("name")
-    if not file_id or not name:
+    path = info.get("path") or entry.get("path")
+    if not file_id or not name or (entry.get("type") == "image" and not info):
         return None
-    return {"id": file_id, "name": name, "path": info.get("path") or entry.get("path")}
+    return {"id": file_id, "name": name, "path": path}
+
+
+_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.+)$", re.DOTALL)
+
+
+def inline_images(body: dict, files: list | None) -> list[tuple[str, bytes]]:
+    """Pictures attached in the chat. Open WebUI does not pass a JPG or PNG
+    as a file: it embeds it in the user's message as a data URL (and may
+    list it in `__files__` as type "image" with that same URL)."""
+    urls: list[str] = []
+    messages = body.get("messages") or []
+    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    content = (last_user or {}).get("content")
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                image = part.get("image_url")
+                urls.append(image.get("url", "") if isinstance(image, dict) else str(image or ""))
+    for entry in files or []:
+        if entry.get("type") == "image" and isinstance(entry.get("url"), str):
+            urls.append(entry["url"])
+
+    images: list[tuple[str, bytes]] = []
+    for url in urls:
+        match = _DATA_URL.match(url.strip())
+        if not match:
+            continue
+        try:
+            data = base64.b64decode(match.group(2))
+        except ValueError:
+            continue
+        extension = {"jpeg": "jpg", "svg+xml": "svg"}.get(match.group(1).lower(), match.group(1).lower())
+        images.append((f"bild_{len(images) + 1}.{extension}", data))
+    return images
 
 
 def read_file(ref: dict) -> bytes | None:
@@ -191,16 +230,30 @@ class Pipe:
 
         doc_id = None
         try:
+            attachments: list[tuple[str, bytes]] = []
             for entry in __files__ or []:
                 ref = file_ref(entry)
                 if ref is None:
                     continue
-                step = text["reading"].format(name=ref["name"])
-                await self._status(__event_emitter__, step)
                 data = await asyncio.to_thread(read_file, ref)
                 if data is None:
                     return text["unreadable"].format(name=ref["name"])
-                result = await self._wait(__event_emitter__, text, step, self._ingest, ref, data, __chat_id__)
+                attachments.append((ref["name"], data))
+            attachments.extend(inline_images(body, __files__))
+
+            seen: set[str] = set()
+            for name, data in attachments:
+                # The content itself identifies a document: the same file
+                # attached again, or listed twice by Open WebUI, is read once.
+                source_id = hashlib.sha256(data).hexdigest()
+                if source_id in seen:
+                    continue
+                seen.add(source_id)
+                step = text["reading"].format(name=name)
+                await self._status(__event_emitter__, step)
+                result = await self._wait(
+                    __event_emitter__, text, step, self._ingest, name, data, source_id, __chat_id__,
+                )
                 doc_id = result["doc_id"]
 
             step = text["thinking"]
@@ -233,11 +286,11 @@ class Pipe:
             return
         await emitter({"type": "status", "data": {"description": description, "done": done, "hidden": done}})
 
-    def _ingest(self, ref: dict, data: bytes, chat_id: str | None) -> dict:
+    def _ingest(self, name: str, data: bytes, source_id: str, chat_id: str | None) -> dict:
         response = requests.post(
             f"{self.valves.API_BASE}/ingest",
-            files={"file": (ref["name"], data)},
-            data={"source_id": ref["id"], "chat_id": chat_id or ""},
+            files={"file": (name, data)},
+            data={"source_id": source_id, "chat_id": chat_id or ""},
             timeout=self.valves.INGEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()

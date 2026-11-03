@@ -298,3 +298,64 @@ tested on a different PC:
    back to the older method: still safe, just less strict.
 4. A real multi-page inventory PDF from the office: the answer's total
    matches a total worked out by hand.
+5. A photo of a table (JPG or PNG) gets an answer (second review, fix B).
+
+---
+
+# Second review
+
+A second full review, looking especially at SETUP.md from the point of
+view of someone setting up the real Mac. Two of the problems were found
+by testing against Open WebUI itself, not by reading the code.
+
+### A. Scanned PDFs were rejected by Open WebUI before the pipeline saw them
+**What was wrong:** with its default settings, Open WebUI indexes every
+uploaded file for its own search. A scanned PDF has no text, so Open
+WebUI marks the upload as failed ("The content provided is empty").
+Tested: an image-only PDF failed with default settings and went through
+with **Bypass Embedding and Retrieval** switched on.
+
+**Fix:** SETUP.md section 5 now has a required step to switch that
+setting on (it also makes uploads faster), plus a troubleshooting entry.
+
+### B. Photos and image scans never reached the pipeline
+**What was wrong:** Open WebUI doesn't pass a JPG or PNG to a Pipe as a
+file. It embeds the picture in the message itself. The Pipe only looked
+at files, so pictures were silently ignored.
+
+**Fix:** the Pipe also takes pictures from the message. Every attachment
+is now recognised by a fingerprint of its content, so a picture that
+Open WebUI lists twice, or a file attached again, is read only once.
+Pictures in WebP, GIF, TIFF or BMP are converted to PNG for the vision
+model. SETUP.md tells you to leave the model's **Vision** capability on,
+and section 7 adds a photo test.
+
+### C. The "switch off OpenAI" setting didn't work on an existing Open WebUI
+**What was wrong:** Open WebUI saves its connection settings in its own
+database on first start and ignores the environment variables after
+that. The Open WebUI already on the Mac would have kept its OpenAI
+connection and its old Ollama address, even after SETUP's step to
+re-create it with new settings.
+
+**Fix:** SETUP.md section 5 now sets the connections by hand in the
+Admin Panel, for every kind of installation, with a check that Ollama
+answers.
+
+### D. A logo on a cover page loaded the vision model
+**What was wrong:** any short page with any image counted as a scan. A
+normal PDF whose cover page has a logo and a title loaded the 21 GB
+vision model for nothing, which takes about a minute.
+
+**Fix:** a page counts as a scan only if images cover at least 30% of
+it.
+
+### Also improved in SETUP.md
+- Which part of section 5 applies to which kind of installation, and
+  that "Settings inside Open WebUI" is always needed.
+- How big the Open WebUI download is (option A).
+- Troubleshooting entries for the Ollama connection, a chat that isn't
+  using Document Intelligence, and photos refused by the model.
+- Final checklist: Open WebUI settings and the photo test.
+
+**Checked with:** 52 automatic tests, all passing (new ones for B and D),
+and the scanned-PDF upload test against Open WebUI 0.11 described in A.
