@@ -117,8 +117,10 @@ See [`SETUP.md`](SETUP.md). In short: `scripts/setup_mac.sh` installs
 native Ollama as a background service with the right memory settings,
 downloads both models, installs the Python packages with `uv`, runs the
 tests, and starts the pipeline service and the cleanup job as background
-services. Open WebUI and the Pipe function are then set up by hand,
-following SETUP.md sections 5 and 6.
+services, then installs Open WebUI natively (with `uv`) and starts it as
+a background service with the settings this project needs. Creating the
+admin account and pasting in the Pipe function are done by hand,
+following SETUP.md sections 5 and 6. Docker is not used anywhere.
 
 ---
 

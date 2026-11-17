@@ -1,17 +1,18 @@
 # Mac Studio setup guide
 
-This guide takes the Mac Studio from "someone installed something, we're
-not sure what" to a working system that staff can use from their own
-computers. It assumes no experience with Terminal or macOS
-administration. Follow it from top to bottom and don't skip sections.
+This guide takes a **freshly reset Mac Studio, with nothing installed**,
+to a working system that staff can use from their own computers. It
+assumes no experience with Terminal or macOS administration. Follow it
+from top to bottom and don't skip sections.
 
 **What you end up with:**
-- Ollama running natively on the Mac (not in Docker), with two models:
-  `qwen2.5-coder:32b` (answers questions by calculating) and
-  `qwen2.5vl:32b` (reads scanned pages)
+- Ollama running on the Mac, with two models: `qwen2.5-coder:32b`
+  (answers questions by calculating) and `qwen2.5vl:32b` (reads scanned
+  pages and photos)
 - the pipeline service from this project, running in the background
-- Open WebUI, where staff attach a document and ask questions about it
-- everything restarting on its own after a reboot
+- Open WebUI, the web page where staff attach a document and ask
+  questions about it
+- everything starting again by itself after a reboot
 
 **Time needed:** about 1 to 3 hours. Most of it is waiting for downloads.
 
@@ -20,25 +21,24 @@ guide open on a second screen or another computer.
 
 ### Everything that gets installed, and which step installs it
 
-A fresh Mac has none of the developer tools this project needs: no git,
-no usable Python, no pandas or DuckDB. You don't install those one by
-one. Two steps are done by hand, and the setup script installs the rest.
+A reset Mac has none of this. Two steps are done by hand; the setup
+script installs everything else.
 
 | What | What it's for | Installed by |
 |---|---|---|
-| Xcode Command Line Tools, which include **git** | git downloads this project from GitHub. | **You, by hand:** section 3.3 |
-| **Homebrew** | Installs command-line programs such as Ollama. | **You, by hand:** section 3.4 (it asks for your password) |
-| **Ollama** (native, not in Docker) | Runs the AI models. | The setup script, step 4 |
+| Xcode Command Line Tools, which include **git** | git downloads this project from GitHub. | **You, by hand:** section 2 |
+| **Homebrew** | Installs command-line programs such as Ollama. | **You, by hand:** section 3 (it asks for your password) |
+| **Ollama** | Runs the AI models. | The setup script, step 4 |
 | The two **models** | The AI itself. About 45 GB. | The setup script, step 7 |
 | **uv** | Installs Python and the Python libraries. | The setup script, step 8 |
 | **Python 3.12** | The language the project is written in. | The setup script, step 8 (uv downloads it) |
-| **pandas, DuckDB, pdfplumber, PyMuPDF, openpyxl, FastAPI, uvicorn** and a few more | The Python libraries the code uses. The full list is in `pyproject.toml`. | The setup script, step 8 (`uv sync`) |
-| **Open WebUI** | The web page staff use. Probably already there. | Already installed, or by you: section 5 |
-| **VS Code** | Only if you want to read or edit the code. Not needed to run anything. | Optional, by you: section 4.5 |
+| **pandas, DuckDB, pdfplumber, PyMuPDF, openpyxl, FastAPI, uvicorn** and a few more | The Python libraries the code uses. The full list is in `pyproject.toml`. | The setup script, step 8 |
+| **Open WebUI** | The web page staff use. | The setup script, step 12 |
+| **VS Code** | Only if you want to read or edit the code. Not needed to run anything. | Optional, by you: section 4.4 |
 
-The Python libraries go into a folder inside the project,
-`~/blueprint/.venv`. They don't touch the rest of the Mac, and deleting
-that folder removes them completely.
+Nothing else is needed: no Docker, no separate Python download, no
+GitHub account. The Python libraries go into a folder inside the
+project, `~/blueprint/.venv`, and don't touch the rest of the Mac.
 
 ---
 
@@ -63,38 +63,26 @@ boxes below is a command.
    and press Enter.
 6. **To stop a command** that seems stuck, press `Control + C`.
 7. **Anything in `<angle brackets>`** is a placeholder. Replace it,
-   including the brackets, with the real value. Example: if a command
-   says `docker stop <container-name>` and the name is `ollama`, you type
-   `docker stop ollama`.
+   including the brackets, with the real value.
 8. **If you close Terminal,** just open it again. To get back into the
    project folder, run `cd ~/blueprint`.
 
 Coloured text or the word "warning" is usually fine. The setup script
 prints `STOPPED:` when something really is wrong, and tells you what.
 
----
+### What the internet connection is (and isn't) used for
 
-## 0. What the internet connection is (and isn't) used for
-
-The Mac is connected to the internet. That connection is used **only to
-download and update software and models**: Homebrew packages, Python
-packages, Ollama itself, and models (about 45 GB for the two this project
-uses; you can add others later, see section 9).
-
-It is **never** used to process documents. Uploaded files, the questions
-asked about them and the answers all stay on the Mac. The models run
-locally in Ollama, the data sits in local files, and no cloud AI service
-or API key is involved anywhere. Section 5 switches off the parts of Open
-WebUI that would otherwise talk to outside services.
+The internet is used **only to download and update software and
+models**. It is **never** used to process documents: uploaded files, the
+questions and the answers all stay on the Mac. The models run locally,
+the data sits in local files, and no cloud AI service or API key is
+involved anywhere.
 
 ---
 
-## 1. Find out what's on this Mac (this changes nothing)
+## 1. Check the Mac (this changes nothing)
 
-Run these one at a time and read what comes back. Write the results into
-the table in 1.7.
-
-### 1.1 Hardware, macOS version and free disk space
+### 1.1 Hardware, macOS and free disk space
 ```bash
 sw_vers
 uname -m
@@ -105,171 +93,34 @@ Expect:
 - a macOS version number (`ProductVersion`)
 - `arm64` (this means Apple Silicon, which is what we need)
 - `64 GB RAM`
-- in the last command, the `Avail` column: at least **80 GB free**
-  (models take about 45 GB, plus room for documents)
+- in the last command, the `Avail` column: at least **100 GB free**
+  (models about 45 GB, Open WebUI a few GB, plus room for documents)
 
 ### 1.2 Do you have admin rights?
-Easiest way: open **System Settings → Users & Groups**. Your account
-should say **Admin** under its name.
+Open **System Settings → Users & Groups**. Your account must say
+**Admin** under its name.
 
-Or in Terminal:
-```bash
-whoami
-dscl . -read /Groups/admin GroupMembership
-```
-The name printed by the first command must appear in the second one.
+If it doesn't, stop here. Whoever manages this Mac has to make your
+account an admin first. Nothing in this guide can do that for you.
 
-If you are not an admin, stop here. Whoever manages this Mac has to make
-your account an admin first. Nothing in this guide can do that for you.
+### 1.3 Install macOS updates
+**System Settings → General → Software Update.** Install anything that's
+offered and restart if asked. A freshly reset Mac often has updates
+waiting, and doing them now avoids a restart in the middle of the setup.
 
-### 1.2a Are Apple's developer tools (and git) installed?
-```bash
-xcode-select -p
-```
-- It prints `/Library/Developer/CommandLineTools` (or a path containing
-  `Xcode.app`): the tools and git are installed. You can skip 3.3 later.
-- It prints an error such as `unable to get active developer directory`:
-  not installed. You'll install them in section 3.3.
-
-Don't type `git` or `python3` to check. On a Mac without the developer
-tools, those words open an install window. That's harmless, but it's
-better to install them in section 3.3 on purpose.
-
-### 1.3 Is Docker installed, and what runs in it?
-```bash
-ls /Applications | grep -i docker
-docker ps -a
-```
-- If the first command prints nothing and the second says
-  `command not found`, Docker isn't installed. That's fine.
-- If the second command says `Cannot connect to the Docker daemon`, Docker
-  is installed but not running. Open the **Docker** app from Applications,
-  wait until the whale icon in the menu bar stops moving, and run
-  `docker ps -a` again.
-- Otherwise it lists containers. Note every row whose `NAMES` or `IMAGE`
-  column contains `ollama` or `open-webui`, and write down the name.
-
-Why it matters: Docker on a Mac runs inside a virtual machine that can't
-use the Mac's graphics chip. Ollama in Docker therefore runs on the CPU
-only, which is much slower and a likely cause of hanging and timeouts.
-
-### 1.4 Is Ollama installed, and how?
-```bash
-which ollama
-ollama --version
-ls /Applications | grep -i ollama
-```
-How to read it:
-- `which ollama` prints a path such as `/opt/homebrew/bin/ollama`: Ollama
-  is installed natively.
-- `ls /Applications` shows `Ollama.app`: the Ollama **desktop app** is
-  installed. It will have to be quit (section 3.2).
-- `which ollama` prints nothing, but 1.3 showed an ollama container: it
-  only exists in Docker.
-- Nothing anywhere: not installed. The setup script will install it.
-
-### 1.5 Is Open WebUI installed, and how?
-```bash
-docker ps -a | grep -i open-webui
-which open-webui
-lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(3000|8080) '
-```
-Then open Safari on the Mac and go to `http://localhost:3000`. If a
-login page appears, Open WebUI is installed and running.
-
-Note which of these is true: it runs in Docker (first command printed a
-line), it's installed natively (second command printed a path), or it's
-not installed.
-
-If the page works but neither of the first two commands printed
-anything, find out which program is serving it:
-```bash
-lsof -nP -iTCP:3000 -sTCP:LISTEN
-```
-Look at the first column (`COMMAND`):
-- `com.docke`, `vpnkit` or anything with `docker`: it runs in **Docker**
-  (Docker Desktop may simply not have been started in 1.3; start it and
-  repeat 1.3 to get the container name).
-- `python`, `python3` or `open-webui`: it's a **native** install.
-- anything else: write the name down and treat it as "installed some
-  other way". Keep it running as it is. In section 5, skip options A and
-  B, but do "Settings inside Open WebUI".
-
-### 1.6 Which models are already downloaded?
-```bash
-ollama list
-```
-If Ollama only exists in Docker, use the container name from 1.3:
-```bash
-docker exec -it <container-name> ollama list
-```
-Models already on the Mac (for example a small IBM Granite model someone
-installed for testing) are kept. Native Ollama uses the same model folder
-as the Ollama desktop app, so they stay available in Open WebUI. Only
-models that lived inside a Docker container are not carried over. Old
-models aren't harmful, but each one takes disk space; you can remove one
-later with `ollama rm <model-name>`.
-
-### 1.7 Write down what you found
-
-| Question | Your answer |
-|---|---|
-| Admin rights? | yes / no |
-| Developer tools (git) installed? (1.2a) | yes / no |
-| Free disk space | ___ GB |
-| Ollama is | native / desktop app / in Docker / not installed |
-| Ollama container name (if Docker) | ___ |
-| Open WebUI is | native / in Docker / not installed |
-| Open WebUI container name (if Docker) | ___ |
+### 1.4 Give the Mac a name you'll recognise (optional)
+**System Settings → General → About → Name**, for example `Mac Studio
+KI`. It makes the Mac easy to find in the office network later.
 
 ---
 
-## 2. Decide what to keep and what to replace
+## 2. Xcode Command Line Tools (this installs git)
 
-| | If it's native | If it's in Docker | If it's not installed |
-|---|---|---|---|
-| **Ollama** | Keep it. The setup script upgrades it and runs it properly. | **Replace it** with native Ollama (section 3.1). | The setup script installs it. |
-| **Open WebUI** | Keep it. | Keep it, Docker is fine for Open WebUI (section 5, option B). | Install it natively (section 5, option A). |
-
-**Why only Ollama has to leave Docker:** Ollama does the heavy work and
-needs the Mac's graphics chip, which Docker can't give it. Open WebUI is
-only the web page staff use; it does no heavy work, so Docker costs it
-nothing. If Open WebUI is already in Docker with user accounts and chats,
-leave it there.
-
----
-
-## 3. Prepare the Mac
-
-### 3.1 Only if Ollama runs in Docker: remove that container
-Use the exact name you wrote down in 1.7:
-```bash
-docker stop <container-name>
-docker rm <container-name>
-```
-This removes only that container, not Docker and not Open WebUI. Its
-downloaded models are not reused; the native install downloads them
-again. (The setup script also offers to do this for you.)
-
-### 3.2 Only if the Ollama desktop app is installed: quit it for good
-The desktop app starts its own copy of Ollama every time someone logs in,
-which blocks the one this project sets up.
-1. Click the llama icon in the menu bar at the top of the screen, then
-   **Quit Ollama**.
-2. Open **System Settings → General → Login Items & Extensions** (on
-   older macOS: **Login Items**). Under "Open at Login", select
-   **Ollama** and click the **minus** button below the list.
-3. Recommended: open Finder → Applications and drag **Ollama** to the
-   Trash.
-
-### 3.3 Xcode Command Line Tools (this also installs git)
 These are Apple's basic developer tools. They include **git**, which
 section 4 uses to download this project, and Homebrew needs them too.
 It's a small download (about 1 GB), not the full Xcode app. They also
-include an old Python (3.9), which this project does **not** use; the
-setup script installs its own, newer Python later.
+include an old Python (3.9), which this project does **not** use.
 
-Skip this if 1.2a showed the tools are already installed.
 ```bash
 xcode-select --install
 ```
@@ -286,14 +137,11 @@ git --version
 The first should print `/Library/Developer/CommandLineTools`, the second
 a version such as `git version 2.39.5`.
 
-### 3.4 Homebrew
-Homebrew installs command-line programs on a Mac. First check if it's
-already there:
-```bash
-brew --version
-```
-If this prints a version number, skip to section 4. If it says
-`command not found`, install it:
+---
+
+## 3. Homebrew
+
+Homebrew installs command-line programs on a Mac.
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
@@ -326,46 +174,44 @@ git clone https://github.com/Mirza-Adnan-Baig/blueprint.git
 cd blueprint
 ```
 This creates a folder called `blueprint` in your home folder and moves
-into it. The project on GitHub is public, so no GitHub account or login
-is needed. If git says the folder `already exists`, the project is
-already there; update it instead:
-```bash
-cd ~/blueprint
-git pull
-```
+into it. The project is public on GitHub, so no account or login is
+needed.
 
 ### 4.2 Run the setup script
 ```bash
 bash scripts/setup_mac.sh
 ```
-Leave the Terminal window open while it runs. It does everything below
-by itself and prints a heading for each step. The model downloads (step
-7) are the slow part: expect 30 minutes to several hours depending on the
-internet connection.
+Leave the Terminal window open while it runs. It prints a heading for
+each step. The model download (step 7) is the slow part: 30 minutes to
+several hours depending on the internet connection.
 
 | Step | What it does |
 |---|---|
 | 1 | Checks this is an Apple Silicon Mac. |
-| 2 | Looks for Ollama inside Docker. If it finds a container, it asks whether to remove it: type `y` and press Enter. |
-| 3 | Checks Homebrew is installed and switches off Homebrew's usage statistics. |
-| 4 | Installs Ollama natively, or upgrades it if it's already there. |
-| 5 | Makes sure nothing else is using Ollama's port. If the Ollama desktop app is running, it quits it. If something else blocks the port, it stops and tells you what. |
-| 6 | Starts Ollama as a background service that also starts after every reboot, with the memory settings this project needs. |
+| 2 | Looks for Ollama inside Docker. On a reset Mac there is none, so it just says OK. |
+| 3 | Checks Homebrew and switches off Homebrew's usage statistics. |
+| 4 | Installs Ollama. |
+| 5 | Makes sure nothing else is using Ollama's port (11434). |
+| 6 | Starts Ollama as a background service, with the memory settings this project needs. |
 | 7 | Downloads the two models (about 45 GB). |
-| 8 | Installs `uv`, then Python 3.12 (uv downloads it), then every Python library the project needs: pandas, DuckDB, pdfplumber, PyMuPDF, openpyxl, FastAPI, uvicorn and a few more, all into `~/blueprint/.venv`. At the end it prints the installed versions. |
+| 8 | Installs `uv`, then Python 3.12, then every Python library the project needs, all into `~/blueprint/.venv`. At the end it prints the installed versions. |
 | 9 | Creates the settings file `.env`. |
 | 10 | Runs the project's automatic tests. They must all pass. |
-| 11 | Starts the pipeline service and the hourly cleanup job as background services, then waits until the pipeline answers. |
+| 11 | Starts the pipeline service and the hourly cleanup job, then waits until the pipeline answers. |
+| 12 | Installs Open WebUI (a few GB) and starts it as a background service. Its first start takes several minutes. |
 
-When it's finished it prints `All done`. If it prints `STOPPED:`
-instead, read the line after it and go to section 10.
+When it's finished it prints `All done` and two addresses: the one for
+this Mac (`http://localhost:3000`) and the one for office computers
+(`http://192.168.x.x:3000`). **Write the second one down.** If it prints
+`STOPPED:` instead, read the line after it and go to section 10.
 
-**macOS notifications you will see while it runs:** "Background Items
-Added" (sometimes mentioning `ollama`, `uvicorn`, `python` or `bash`).
-That's expected: it's the background services being set up. **Don't
-switch them off.** If you ever open System Settings → General → Login
-Items & Extensions, the entries under "Allow in the Background" for these
-programs must stay on, or the services won't start after the next login.
+**macOS messages you will see while it runs:**
+- **"Background Items Added"** (mentioning `ollama`, `uvicorn`,
+  `python`, `open-webui` or `bash`): expected, it's the background
+  services being set up. **Don't switch them off.**
+- **"Do you want the application python to accept incoming network
+  connections?"**: click **Allow**. Otherwise office computers can't
+  reach Open WebUI.
 
 The script is safe to run again at any time. It skips what's already
 done and restarts the services.
@@ -376,16 +222,44 @@ ollama --version
 ollama list
 curl http://127.0.0.1:11434
 curl http://127.0.0.1:8080/health
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000
 ```
 Expect:
 - an Ollama version number
 - both `qwen2.5-coder:32b` and `qwen2.5vl:32b` in the list
 - `Ollama is running`
 - `{"status":"ok"}`
+- `200` (Open WebUI is up; if it says `000`, wait two minutes and try
+  again, the first start is slow)
 
-### 4.4 The Ollama settings, for reference
-The script puts these into the Ollama background service. You don't
-need to change them.
+### 4.4 Optional: VS Code, for reading and editing the code
+Nothing here needs VS Code; install it only if you want to work on the
+code on the Mac.
+
+1. Install it:
+   ```bash
+   brew install --cask visual-studio-code
+   ```
+2. Open the project:
+   ```bash
+   code ~/blueprint
+   ```
+   If VS Code asks **"Do you trust the authors of the files in this
+   folder?"**, click **Yes, I trust the authors**.
+3. Click the Extensions icon on the left (four small squares), search for
+   **Python**, and install the one published by **Microsoft**.
+4. Press `Cmd + Shift + P`, type **Python: Select Interpreter**, press
+   Enter, and choose the entry that shows `.venv/bin/python`.
+5. Menu **Terminal → New Terminal** opens a terminal already inside
+   `~/blueprint`; every command in this guide works there too.
+
+After changing code, restart the pipeline (section 9, "Restart a
+service") and run the tests with `uv run pytest`. Don't start a second
+copy of the service from VS Code's Run button; both would want port 8080.
+
+### 4.5 For reference: the settings the script uses
+
+Ollama:
 
 | Setting | Value | Why |
 |---|---|---|
@@ -395,193 +269,48 @@ need to change them.
 | `OLLAMA_NUM_PARALLEL` | `1` | One request at a time per model; parallel slots each need extra memory. |
 | `OLLAMA_KEEP_ALIVE` | `5m` | Unload a model after 5 idle minutes, unless the pipeline pinned it. |
 
-### 4.5 Optional: VS Code, for reading and editing the code
-Nothing in this guide needs VS Code; the system runs without it. Install
-it only if you want to work on the code on the Mac.
+Open WebUI:
 
-1. Install it with Homebrew:
-   ```bash
-   brew install --cask visual-studio-code
-   ```
-   This also installs the `code` command for Terminal.
-2. Open the project:
-   ```bash
-   code ~/blueprint
-   ```
-   If VS Code asks **"Do you trust the authors of the files in this
-   folder?"**, click **Yes, I trust the authors**.
-3. Install the Python extension: click the Extensions icon on the left
-   (four small squares), search for **Python**, and install the one
-   published by **Microsoft**.
-4. Tell VS Code to use the project's Python (the one with pandas and
-   DuckDB in it): press `Cmd + Shift + P`, type **Python: Select
-   Interpreter**, press Enter, and choose the entry that shows
-   `.venv/bin/python` (it may say "Recommended").
-5. VS Code has a built-in Terminal: menu **Terminal → New Terminal**. It
-   opens already inside `~/blueprint`, and every command in this guide
-   works there too.
+| Setting | Value | Why |
+|---|---|---|
+| `DATA_DIR` | `~/open-webui-data` | Users, chats and settings live here, so updates never delete them. |
+| `--host 0.0.0.0`, `--port 3000` | | Office computers can open it at `http://<mac-ip>:3000`. |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Where Ollama is. |
+| `ENABLE_OPENAI_API` | `false` | No connection to OpenAI's cloud. |
+| `BYPASS_EMBEDDING_AND_RETRIEVAL` | `true` | Open WebUI doesn't try to index uploads itself. Without this, it rejects scanned PDFs ("The content provided is empty") before the pipeline sees them. |
+| `SCARF_NO_ANALYTICS`, `DO_NOT_TRACK`, `ANONYMIZED_TELEMETRY` | | No usage statistics are sent. |
 
-Good to know when you change code:
-- The pipeline service keeps running the version it started with.
-  After saving a change, restart it (section 9, "Restart a service").
-- To run the tests after a change: `uv run pytest` in the terminal.
-- Don't start a second copy of the service from VS Code's Run button
-  while the background service is running; both would want port 8080.
+Open WebUI only reads these on its **very first start** and then keeps
+its own saved values, which is why section 5 checks them in the Admin
+Panel.
 
 ---
 
-## 5. Open WebUI
+## 5. First start of Open WebUI
 
-Do option A **or** option B (whichever fits what you found in section 1),
-then always do **"Settings inside Open WebUI"** at the end of this
-section. Skip options A and B if Open WebUI was "installed some other
-way" (1.5), but still do the settings at the end.
+### 5.1 Create the admin account
+1. Open **Safari** on the Mac and go to `http://localhost:3000`.
+2. Click **Get started** and create the first account: name, email and
+   password. The email is only a login name; Open WebUI doesn't send
+   emails.
+3. **The first account becomes the admin account.** Use a strong
+   password and keep it somewhere safe. Everyone else's account is
+   created later (ACCESS.md).
 
-Options A and B start Open WebUI with these settings:
-
-| Setting | Value | Effect |
-|---|---|---|
-| `ENABLE_OPENAI_API` | `false` | Removes the built-in connection to OpenAI's cloud, so no chat can go to a cloud model by accident. |
-| `SCARF_NO_ANALYTICS`, `DO_NOT_TRACK` | `true` | No usage statistics are sent. |
-| `ANONYMIZED_TELEMETRY` | `false` | No telemetry from the built-in search database. |
-
-Open WebUI only uses some of these on its **very first start**; after
-that it keeps its own saved values. An Open WebUI that was already in use
-ignores them for the connections, which is why the last part of this
-section sets the connections by hand in the Admin Panel.
-
-### Option A: install Open WebUI natively
-Use this if Open WebUI is not installed yet. (If it runs in Docker and
-you'd rather keep it there, use option B instead.)
-
-1. Make `uv` available in this Terminal window (the setup script
-   installed it):
-   ```bash
-   source $HOME/.local/bin/env
-   ```
-2. Install Open WebUI (a large download of a few GB; 5 to 15 minutes):
-   ```bash
-   uv tool install --python 3.11 open-webui
-   ```
-3. Set it up as a background service. Copy this **whole** box at once;
-   it writes a settings file and starts Open WebUI:
-   ```bash
-   mkdir -p ~/open-webui-data
-   cat > ~/Library/LaunchAgents/com.docintel.openwebui.plist <<EOF
-   <?xml version="1.0" encoding="UTF-8"?>
-   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-   <plist version="1.0">
-   <dict>
-     <key>Label</key><string>com.docintel.openwebui</string>
-     <key>ProgramArguments</key>
-     <array>
-       <string>$HOME/.local/bin/open-webui</string>
-       <string>serve</string>
-       <string>--host</string><string>0.0.0.0</string>
-       <string>--port</string><string>3000</string>
-     </array>
-     <key>EnvironmentVariables</key>
-     <dict>
-       <key>DATA_DIR</key><string>$HOME/open-webui-data</string>
-       <key>OLLAMA_BASE_URL</key><string>http://127.0.0.1:11434</string>
-       <key>ENABLE_OPENAI_API</key><string>false</string>
-       <key>SCARF_NO_ANALYTICS</key><string>true</string>
-       <key>DO_NOT_TRACK</key><string>true</string>
-       <key>ANONYMIZED_TELEMETRY</key><string>false</string>
-     </dict>
-     <key>RunAtLoad</key><true/>
-     <key>KeepAlive</key><true/>
-     <key>StandardOutPath</key><string>$HOME/open-webui-data/openwebui.log</string>
-     <key>StandardErrorPath</key><string>$HOME/open-webui-data/openwebui.log</string>
-   </dict>
-   </plist>
-   EOF
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.docintel.openwebui.plist
-   ```
-4. **The first start takes a few minutes** (it downloads a small helper
-   model once). If macOS asks whether to **allow incoming network
-   connections**, click **Allow**; otherwise other computers can't reach
-   Open WebUI.
-5. Open Safari on the Mac and go to `http://localhost:3000`. When the
-   page appears, click **Get started** and create the first account.
-   **The first account becomes the admin account.** Use a strong password
-   and keep it somewhere safe.
-
-What the settings mean: `DATA_DIR` keeps all users, chats and settings in
-the folder `open-webui-data` in your home folder, so updating Open WebUI
-never deletes them. `--host 0.0.0.0` lets other computers in the office
-reach it.
-
-### Option B: keep Open WebUI in Docker
-Settings can only be given to a Docker container when it's created, so
-the container is created again. Its users and chats are kept, because
-they live in a separate storage area (a "volume") that is reused.
-
-1. Find the volume name. Use the Open WebUI container name from 1.7:
-   ```bash
-   docker inspect <container-name> --format '{{range .Mounts}}{{.Name}} -> {{.Destination}}{{"\n"}}{{end}}'
-   ```
-   Find the line that ends in `/app/backend/data`. The word before `->`
-   is the volume name (often `open-webui`). Write it down.
-2. Re-create the container. Replace both placeholders, then copy the
-   whole box:
-   ```bash
-   docker stop <container-name>
-   docker rm <container-name>
-   docker run -d -p 3000:8080 \
-     --add-host=host.docker.internal:host-gateway \
-     -v <volume-name>:/app/backend/data \
-     -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-     -e ENABLE_OPENAI_API=false \
-     -e SCARF_NO_ANALYTICS=true \
-     -e DO_NOT_TRACK=true \
-     -e ANONYMIZED_TELEMETRY=false \
-     --restart always \
-     --name open-webui \
-     ghcr.io/open-webui/open-webui:main
-   ```
-   Be careful with the volume name: a typo creates a new, empty volume
-   and Open WebUI starts with no users. If that happens, stop and remove
-   the container again and repeat with the correct name.
-3. Make Docker start by itself after a reboot: open the Docker app →
-   **Settings** (gear icon) → **General** → tick **Start Docker Desktop
-   when you sign in** → **Apply**.
-4. Remember for section 6: inside Docker, `localhost` means the container
-   itself, not the Mac. That's why Ollama is reached at
-   `host.docker.internal`, and why the Pipe's address in section 6.2 is
-   different for Docker.
-
-### Settings inside Open WebUI (always do this, whatever option applies)
-1. Open `http://localhost:3000` in Safari on the Mac and sign in with the
-   admin account.
-2. Click your name (bottom left) → **Admin Panel** → **Settings** →
-   **Connections**:
-   - **OpenAI API:** switch it **off**.
-   - **Ollama API:** the address must be
-     `http://127.0.0.1:11434` if Open WebUI was installed natively
-     (option A), or `http://host.docker.internal:11434` if it runs in
-     Docker (option B). If it shows something else (for example
-     `http://ollama:11434` from an old Docker setup), click the gear or
-     pencil next to it and correct it. Then click the small circular
-     arrow (verify) next to it: it should say the connection is verified.
-   - Click **Save**.
-3. Still in **Settings**, open **Documents** and switch **on** **Bypass
-   Embedding and Retrieval**, then click **Save**.
-   This one matters for scanned PDFs. Without it, Open WebUI tries to
-   index every uploaded file itself, finds no text in a scan, and
-   **rejects the upload** with "The content provided is empty" before
-   the pipeline ever sees it (this was tested). It also makes uploads
-   faster. It affects all models in Open WebUI, which is fine because
-   staff should only use Document Intelligence (ACCESS.md, section 5).
-4. Start a new chat, pick any model that was already there, and type
-   "Hallo" to check Open WebUI can talk to Ollama.
-5. From another computer in the office, open `http://<mac-ip>:3000`. To
-   find the Mac's IP address:
-   ```bash
-   ipconfig getifaddr en0
-   ```
-   If that prints nothing (the Mac uses Wi-Fi rather than a cable), try
-   `ipconfig getifaddr en1`.
+### 5.2 Check the settings
+Click your name (bottom left) → **Admin Panel** → **Settings**:
+1. **Connections:**
+   - **OpenAI API** must be **off**.
+   - **Ollama API** must show `http://127.0.0.1:11434`. Click the small
+     circular arrow next to it (verify): it should say the connection is
+     verified.
+   - If you changed anything, click **Save**.
+2. **Documents:** **Bypass Embedding and Retrieval** must be **on**. If
+   it isn't, switch it on and click **Save**.
+3. Start a new chat, choose `qwen2.5-coder:32b` at the top, and type
+   "Hallo". An answer means Open WebUI can talk to Ollama. (This is only
+   a connection test. Staff will never chat with this model directly;
+   see ACCESS.md section 5.)
 
 ---
 
@@ -598,55 +327,41 @@ they live in a separate storage area (a "volume") that is reused.
    **Functions** → the **+** button (New Function).
 3. Click into the code area, press `Cmd + A` and then Delete to remove
    the example code, then press `Cmd + V` to paste.
-4. Check the first lines of the code area start with `"""` and
+4. Check the first lines start with `"""` and
    `title: Document Intelligence`. Then click **Save**.
 5. Back in the Functions list, switch **Document Intelligence** on with
    its toggle on the right.
 
-**Important when updating the function later:** always select everything
-in the code area and delete it before pasting the new version. If you
-paste without clearing it first, the old code stays in the file and
-Open WebUI may keep running the old version.
+**When updating the function later:** always select everything in the
+code area and delete it before pasting the new version. Otherwise the
+old code stays in and Open WebUI may keep running it.
 
 ### 6.2 Check the function's settings ("Valves")
 In the Functions list, click the gear icon next to Document Intelligence.
 
 | Setting | What to enter |
 |---|---|
-| `API_BASE` | `http://localhost:8080` if Open WebUI was installed natively (option A). `http://host.docker.internal:8080` if Open WebUI runs in Docker (option B). |
+| `API_BASE` | `http://localhost:8080` (the default) |
 | `LANGUAGE` | `de` for German status messages, `en` for English. |
 | The three `..._SECONDS` settings | Leave as they are. |
 
 Click **Save**.
 
-**Only if Open WebUI runs in Docker:** check that it can reach the
-pipeline service on the Mac:
-```bash
-docker exec open-webui curl -s http://host.docker.internal:8080/health
-```
-(Use your container name instead of `open-webui` if it's different.)
-It should print `{"status":"ok"}`. If it prints nothing or an error, see
-"Open WebUI in Docker can't reach the pipeline" in section 10.
-
-### 6.3 Let staff see it, and switch off File Context
+### 6.3 Let staff see it
 A new function is **only visible to admins** until you change this.
 1. Admin Panel → **Settings** → **Models**. Find **Document
    Intelligence** and click the pencil icon (edit).
 2. Find **Visibility** (in some versions: **Access**) and set it to
-   **Public**, or add the groups of people who should use it.
-3. Under **Capabilities**, untick **File Context** if you see that
-   option. This stops Open WebUI from also running its own (inaccurate)
-   document search on every upload. The pipeline works either way, but
-   it's faster with it off. Leave **File Upload** and **Vision** ticked
-   (without Vision, Open WebUI refuses photos and image scans).
+   **Public**, or choose the groups of people who should use it.
+3. Under **Capabilities**:
+   - untick **File Context** if you see that option (it stops Open WebUI
+     from running its own, inaccurate document search)
+   - leave **File Upload** and **Vision** ticked (without Vision, Open
+     WebUI refuses photos and image scans)
 4. Click **Save**.
-5. To check: sign in as a normal (non-admin) user and make sure
-   "Document Intelligence" appears in the model list at the top of a new
-   chat.
 
 ### 6.4 First test with the sample file
-The project includes a small test file with answers you can check. Copy
-it to your Desktop:
+Copy the project's test file to your Desktop:
 ```bash
 cp ~/blueprint/samples/lager_beispiel.csv ~/Desktop/
 ```
@@ -656,8 +371,7 @@ folder**, click **Allow**.
 2. At the top, choose **Document Intelligence** as the model.
 3. Click the **+** or paperclip icon in the message box, choose
    **Upload Files**, and pick `lager_beispiel.csv` from the Desktop.
-4. Ask each of these questions, one message at a time, and compare with
-   the expected answer:
+4. Ask each of these questions, one message at a time, and compare:
 
 | Question | Expected answer |
 |---|---|
@@ -666,23 +380,21 @@ folder**, click **Allow**.
 | Welchen Gesamtwert hat der Bestand (Menge mal Einzelpreis)? | 27.582,20 € |
 | Wie viele verschiedene Bezeichnungen gibt es? | 4 |
 
-While it works, a status line above the answer says what's happening
-("Dokument wird eingelesen", "Antwort wird berechnet"). The very first
-question after a restart can take a minute or two while the model loads.
-Follow-up questions in the same chat don't need the file attached again.
+A status line above the answer shows what's happening ("Dokument wird
+eingelesen", "Antwort wird berechnet"). The very first question after a
+restart can take a minute or two while the model loads. Follow-up
+questions in the same chat don't need the file attached again.
 
 If an answer is wrong or doesn't come, go to section 10.
 
 ### 6.5 Give colleagues access
-How staff reach Open WebUI from their own computers, how to create their
-accounts, and how to keep the address from changing is all in
-[`ACCESS.md`](ACCESS.md).
+Creating accounts for colleagues, the link they use, and keeping that
+link from changing are all in [`ACCESS.md`](ACCESS.md).
 
 ---
 
 ## 7. Check the whole system
 
-Run these and compare:
 ```bash
 cd ~/blueprint
 ollama list
@@ -690,26 +402,29 @@ curl http://127.0.0.1:11434
 curl http://127.0.0.1:8080/health
 lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(11434|8080|3000) '
 ```
-Expect: both models listed, `Ollama is running`, `{"status":"ok"}`, and
-in the last command `127.0.0.1:11434` (Ollama) and `127.0.0.1:8080`
-(pipeline), which means only the Mac itself can reach them, plus `*:3000`
-for Open WebUI, the only thing office computers are meant to open.
+Expect: both models, `Ollama is running`, `{"status":"ok"}`, and in the
+last command `127.0.0.1:11434` (Ollama) and `127.0.0.1:8080` (pipeline),
+which only the Mac itself can reach, plus `*:3000` for Open WebUI, the
+only thing office computers are meant to open.
 
-Then test a **scanned PDF** (a real scan, not a PDF made from Word or
-Excel). Upload it in a new chat, ask one question, and when the answer
-has arrived run:
+**Test a scanned PDF** (a real scan, not a PDF made from Word or Excel).
+Upload it in a new chat with Document Intelligence, ask one question,
+and when the answer has arrived run:
 ```bash
 ollama ps
 ```
 It must show **only** `qwen2.5-coder:32b`. The vision model is unloaded
-as soon as a document has been read, because both models don't fit in
-memory together.
+as soon as a document has been read, because both don't fit in memory
+together.
 
-Finally, test a **photo**: take a phone photo of a printed table (or use
-any JPG or PNG of one), attach it in a new chat with Document
-Intelligence, and ask for a total. Pictures travel through Open WebUI
-differently from documents, so this checks that path too. The status
-line should say "Dokument wird eingelesen: bild_1.jpg" (or `.png`).
+**Test a photo:** take a phone photo of a printed table (or use any JPG
+or PNG of one), attach it in a new chat with Document Intelligence and
+ask for a total. The status line should say "Dokument wird eingelesen:
+bild_1.jpg" (or `.png`).
+
+**Test from your own PC:** open `http://192.168.x.x:3000` (the address
+the script printed) in a browser on your Windows PC. The login page
+should appear.
 
 ---
 
@@ -717,35 +432,37 @@ line should say "Dokument wird eingelesen: bild_1.jpg" (or `.png`).
 
 1. **No sleeping:** System Settings → **Energy** → turn on **Prevent
    automatic sleeping when the display is off** and **Start up
-   automatically after a power failure**. (On older macOS: System
-   Settings → Energy Saver.)
+   automatically after a power failure**.
 2. **Automatic login after a restart.** The background services start
    when your user account logs in. After a reboot or power cut, someone
    has to log in, or you switch on System Settings → **Users & Groups** →
    **Automatically log in as** → your account. This option is greyed out
    while FileVault disk encryption is on; decide together with whoever is
    responsible for the Mac's security.
-3. If Open WebUI runs in Docker: Docker must start at login (section 5,
-   option B, step 3).
-4. After the first reboot, check with the commands in section 7 that
-   everything came back by itself.
+3. **A fixed address:** ask whoever runs the office network to give the
+   Mac a fixed IP address, so the link for staff never changes (ACCESS.md
+   section 2).
+4. **Restart once to test:** Apple menu → Restart. After logging in, wait
+   five minutes and run the commands in section 7. Everything must have
+   come back by itself.
 
 ---
 
 ## 9. Daily use and maintenance
 
 ### Where the logs are
-Logs are text files that record what happened. Open one with:
+Logs are text files that record what happened. Open one with, for
+example:
 ```bash
 open -e ~/blueprint/logs/pipeline.log
 ```
 | File | What's in it |
 |---|---|
-| `~/blueprint/logs/pipeline.log` | Every document read and every question, including errors. Look here first. |
+| `~/blueprint/logs/pipeline.log` | Every document read and every question, with the calculation used and its result. Look here first. |
 | `~/blueprint/logs/service.log` | Start-up messages of the pipeline service. |
 | `~/blueprint/logs/ollama.log` | Ollama's own messages. |
 | `~/blueprint/logs/gc.log` | The hourly cleanup. |
-| `~/open-webui-data/openwebui.log` | Open WebUI (option A only). For Docker: `docker logs open-webui`. |
+| `~/open-webui-data/openwebui.log` | Open WebUI. |
 
 ### Restart a service
 ```bash
@@ -753,17 +470,16 @@ launchctl kickstart -k gui/$(id -u)/com.docintel.pipeline
 launchctl kickstart -k gui/$(id -u)/com.docintel.ollama
 launchctl kickstart -k gui/$(id -u)/com.docintel.openwebui
 ```
-Run only the line you need. (The last one is for option A only; for
-Docker use `docker restart open-webui`.)
+Run only the line you need.
 
 ### Change a setting
 Settings are in the file `.env`:
 ```bash
 open -e ~/blueprint/.env
 ```
-Change the value after the `=`, save with `Cmd + S`, close TextEdit, then
-restart the pipeline (first line above). Each setting is explained in
-the file itself.
+Change the value after the `=`, save with `Cmd + S`, close TextEdit,
+then restart the pipeline (first line above). Each setting is explained
+in the file itself.
 
 ### Uploaded files are deleted after 24 hours
 The cleanup job removes uploaded documents and their data after 24
@@ -776,18 +492,10 @@ cd ~/blueprint
 git pull
 bash scripts/setup_mac.sh
 ```
-This gets the newest version of the project, upgrades Ollama, and
-restarts everything. If `pipe_function.py` changed, also paste it into
-Open WebUI again (section 6.1, clear the code area first).
-
-Update Open WebUI, option A:
-```bash
-source $HOME/.local/bin/env
-uv tool upgrade open-webui
-launchctl kickstart -k gui/$(id -u)/com.docintel.openwebui
-```
-Option B: `docker pull ghcr.io/open-webui/open-webui:main`, then repeat
-section 5, option B, step 2 with the same volume name.
+This gets the newest version of the project, upgrades Ollama and Open
+WebUI, and restarts everything. Users, chats and settings in Open WebUI
+are kept. If `pipe_function.py` changed, also paste it into Open WebUI
+again (section 6.1, clear the code area first).
 
 ### Try a different model
 ```bash
@@ -807,49 +515,46 @@ need with `ollama rm <model-name>`.
 
 | What you see | What to do |
 |---|---|
-| The setup script prints `STOPPED: ... port 11434` | Something else runs Ollama. Quit the Ollama desktop app (3.2), remove Ollama containers (3.1), then run the script again. |
-| The setup script prints `STOPPED: some tests failed` | Copy the Terminal output into a message to whoever maintains this project. Don't continue. |
-| The setup script stops during the model download | Usually the internet connection dropped. Run the script again; it continues where it stopped. |
-| Open WebUI says "Der Dokumenten-Dienst ist gerade nicht erreichbar" | The pipeline isn't running. Run `curl http://127.0.0.1:8080/health`. If that fails, restart it (section 9) and look at `logs/service.log`. If Open WebUI runs in Docker, check that `API_BASE` is `http://host.docker.internal:8080` (6.2). |
-| Open WebUI in Docker can't reach the pipeline (the check in 6.2 fails, but `curl http://127.0.0.1:8080/health` on the Mac works) | Let the pipeline listen on the whole network instead of only the Mac itself: run `sed -i '' 's#<string>127.0.0.1</string>#<string>0.0.0.0</string>#' ~/Library/LaunchAgents/com.docintel.pipeline.plist`, then `launchctl bootout gui/$(id -u)/com.docintel.pipeline` and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.docintel.pipeline.plist`, and repeat the check in 6.2. Note: the pipeline service has no password, so after this any computer in the office network could send it questions directly. Only do this on a trusted office network, and note that re-running the setup script switches it back. |
-| "Bitte laden Sie zuerst ein Dokument hoch" | No document in this chat yet, or it was deleted after 24 hours. Attach the file again. |
-| Uploading a scanned PDF shows an error, or "The content provided is empty" | Switch on **Bypass Embedding and Retrieval** (section 5, "Settings inside Open WebUI", step 3), then attach the file again. |
-| Open WebUI shows no models, or an Ollama connection error | Check the Ollama address in Admin Panel → Settings → Connections (section 5, "Settings inside Open WebUI", step 2) and that `curl http://127.0.0.1:11434` on the Mac says `Ollama is running`. |
-| A chat answers without the status line "Dokument wird eingelesen", or answers questions about the document with made-up numbers | The chat is not using **Document Intelligence**. Pick it at the top of a new chat, and hide the other models from staff (ACCESS.md, section 5). |
-| Attaching a photo shows "the model does not support images" | Admin Panel → Settings → Models → Document Intelligence (pencil) → Capabilities: tick **Vision**, save. |
-| Staff can't see "Document Intelligence" | Set its visibility to Public (6.3). |
-| An answer takes several minutes | Normal for scanned PDFs: every page is read by the vision model. Watch the status line. Excel, CSV and normal PDFs should take under a minute. |
-| An answer looks wrong | Open `logs/pipeline.log` (section 9) and find the question. Below it, under `code used:`, is the exact calculation, and under `result:` the number it produced. If a number column was read wrongly, note the file and the column. |
-| `ollama ps` still shows `qwen2.5vl:32b` minutes after reading a document | Run `ollama stop qwen2.5vl:32b`, then look for `FAILED to evict` in `logs/pipeline.log`. |
-| The Mac feels frozen or very slow | Open Activity Monitor → Memory. If "Memory Pressure" is red, too much is loaded: restart Ollama (section 9). |
-| `command not found: brew` | Close Terminal, open a new window. If it's still missing, repeat 3.4. |
+| `command not found: brew` | Close Terminal, open a new window. If it's still missing, repeat section 3. |
 | `command not found: uv` | Run `source $HOME/.local/bin/env`, or open a new Terminal window. |
-| After a reboot, Ollama or the pipeline doesn't run although it worked before | Check System Settings → General → Login Items & Extensions → "Allow in the Background": the entries for `ollama`, `uvicorn`, `python` and `bash` must be on. Then run `bash scripts/setup_mac.sh` again from `~/blueprint`. |
-| Anything else | Restart everything by running `bash scripts/setup_mac.sh` again from `~/blueprint`. It is safe to repeat. |
+| The setup script prints `STOPPED: ... port 11434` | Something else runs Ollama (for example someone installed the Ollama app). Quit it from the menu bar, then run the script again. |
+| The setup script prints `STOPPED: ... port 3000` | Another program uses Open WebUI's port. If it's an old Open WebUI in Docker, quit Docker Desktop. Then run the script again. |
+| The setup script prints `STOPPED: some tests failed` | Copy the Terminal output into a message to whoever maintains this project. Don't continue. |
+| The setup script stops during a download | Usually the internet connection dropped. Run the script again; it continues where it stopped. |
+| `http://localhost:3000` doesn't load | The first start can take 10 minutes. Then look at `~/open-webui-data/openwebui.log` and restart Open WebUI (section 9). |
+| Office computers can't open the link, but it works on the Mac | ACCESS.md section 9. |
+| Open WebUI shows no models, or an Ollama connection error | Check the Ollama address in Admin Panel → Settings → Connections (5.2) and that `curl http://127.0.0.1:11434` says `Ollama is running`. |
+| "Der Dokumenten-Dienst ist gerade nicht erreichbar" | The pipeline isn't running. Run `curl http://127.0.0.1:8080/health`. If that fails, restart it (section 9) and look at `logs/service.log`. |
+| "Bitte laden Sie zuerst ein Dokument hoch" | No document in this chat yet, or it was deleted after 24 hours. Attach the file again. |
+| Uploading a scanned PDF shows an error, or "The content provided is empty" | Switch on **Bypass Embedding and Retrieval** (5.2), then attach the file again. |
+| Attaching a photo shows "the model does not support images" | Tick **Vision** for Document Intelligence (6.3). |
+| Staff can't see "Document Intelligence" | Set its visibility to Public (6.3). |
+| A chat answers without the status line "Dokument wird eingelesen", or with made-up numbers | The chat isn't using **Document Intelligence**. Pick it at the top of a new chat, and hide the other models from staff (ACCESS.md section 5). |
+| An answer takes several minutes | Normal for scanned PDFs and photos: each page is read by the vision model. Excel, CSV and normal PDFs should take under a minute. |
+| An answer looks wrong | Open `logs/pipeline.log` and find the question. Under `code used:` is the exact calculation, and under `result:` the number it produced. Note the file and the column that was read wrongly. |
+| `ollama ps` still shows `qwen2.5vl:32b` minutes after reading a document | Run `ollama stop qwen2.5vl:32b`, then look for `FAILED to evict` in `logs/pipeline.log`. |
+| The Mac feels frozen or very slow | Activity Monitor → Memory. If "Memory Pressure" is red, restart Ollama (section 9). |
+| After a reboot something doesn't run although it worked before | System Settings → General → Login Items & Extensions → "Allow in the Background": the entries for `ollama`, `uvicorn`, `python`, `open-webui` and `bash` must be on. Then run `bash scripts/setup_mac.sh` again. |
+| Anything else | Run `bash scripts/setup_mac.sh` again from `~/blueprint`. It is safe to repeat. |
 
 ---
 
 ## 11. Final checklist
 
-- [ ] `git --version` prints a version number
+- [ ] `git --version` prints a version number (section 2)
+- [ ] `brew --version` prints a version number (section 3)
+- [ ] The setup script printed `All done` (section 4)
 - [ ] `cd ~/blueprint && uv run python --version` prints `Python 3.12.x`
-- [ ] The setup script's step 8 printed versions for pandas, DuckDB,
-      pdfplumber, PyMuPDF and FastAPI
-- [ ] `ollama --version` prints a version number
-- [ ] `ps aux | grep "[o]llama serve"` shows a path with `/opt/homebrew/`,
-      not `docker`
 - [ ] `ollama list` shows `qwen2.5-coder:32b` and `qwen2.5vl:32b`
 - [ ] `curl http://127.0.0.1:8080/health` prints `{"status":"ok"}`
-- [ ] `launchctl list | grep com.docintel` shows `ollama`, `pipeline` and
-      `gc` (and `openwebui` if installed natively)
-- [ ] Open WebUI opens at `http://<mac-ip>:3000` from another computer
-- [ ] Admin Panel → Settings → Connections: OpenAI off, Ollama address
-      correct and verified; Documents: **Bypass Embedding and Retrieval**
-      on (section 5)
-- [ ] "Document Intelligence" is switched on, visible to normal users,
-      and `API_BASE` is right for your setup (6.2)
+- [ ] `launchctl list | grep com.docintel` shows `ollama`, `pipeline`,
+      `gc` and `openwebui`
+- [ ] Admin account created; OpenAI off, Ollama verified, Bypass
+      Embedding and Retrieval on (section 5)
+- [ ] Document Intelligence is on, Public, with Vision ticked (section 6)
 - [ ] The sample file gives all four expected answers (6.4)
 - [ ] After a scanned PDF, `ollama ps` shows only `qwen2.5-coder:32b` (7)
 - [ ] A photo of a table gets an answer (7)
-- [ ] Energy and login settings done (8), and everything came back after
-      one test reboot
+- [ ] Open WebUI opens from your Windows PC (7)
+- [ ] Energy and login settings done, and everything came back after one
+      test restart (8)

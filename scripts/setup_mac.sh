@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Sets up everything this project needs on the Mac Studio, in one go:
 # native Ollama as a background service, the two models, Python and the
-# project's packages, the .env settings file, the pipeline service and
-# the hourly cleanup job. SETUP.md explains every step.
+# project's packages, the .env settings file, the pipeline service, the
+# hourly cleanup job and Open WebUI. SETUP.md explains every step.
 #
 # Needs the internet (it downloads about 45 GB of models). Safe to run
 # again later: it upgrades Ollama, skips what is already there, and
@@ -225,9 +225,86 @@ done
 curl -s http://127.0.0.1:8080/health >/dev/null || fail "the pipeline service did not start. Look at logs/service.log."
 echo "OK: pipeline service is running."
 
+step "12. Installing Open WebUI and starting it as a background service"
+WEBUI_DATA="$HOME/open-webui-data"
+WEBUI_BIN="$HOME/.local/bin/open-webui"
+OWNER="$(port_owner 3000)"
+if [ -n "$OWNER" ] && ! ps -o command= -p "$OWNER" | grep -q "open-webui"; then
+    echo "Port 3000 is in use by:"
+    ps -o pid=,command= -p "$OWNER" || true
+    fail "another program is using port 3000, which Open WebUI needs. Quit it and run this script again."
+fi
+if [ -x "$WEBUI_BIN" ]; then
+    echo "Open WebUI is already installed, upgrading it."
+    uv tool upgrade open-webui || true
+else
+    echo "Downloading Open WebUI (a few GB, 5 to 15 minutes) ..."
+    uv tool install --python 3.11 open-webui
+fi
+mkdir -p "$WEBUI_DATA"
+ADMIN_CHAT_ACCESS="$( { grep -E '^OPENWEBUI_ADMIN_CHAT_ACCESS=' .env || true; } | tail -1 | cut -d= -f2 | tr -d '[:space:]')"
+[ "$ADMIN_CHAT_ACCESS" = "false" ] || ADMIN_CHAT_ACCESS="true"
+# WorkingDirectory matters: Open WebUI writes its secret key file into the
+# folder it starts in, and a background service otherwise starts in "/",
+# which is read-only, so Open WebUI would crash on every start.
+cat > "$AGENTS/com.docintel.openwebui.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.docintel.openwebui</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$WEBUI_BIN</string>
+    <string>serve</string>
+    <string>--host</string><string>0.0.0.0</string>
+    <string>--port</string><string>3000</string>
+  </array>
+  <key>WorkingDirectory</key><string>$WEBUI_DATA</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DATA_DIR</key><string>$WEBUI_DATA</string>
+    <key>OLLAMA_BASE_URL</key><string>http://127.0.0.1:11434</string>
+    <key>ENABLE_OPENAI_API</key><string>false</string>
+    <key>BYPASS_EMBEDDING_AND_RETRIEVAL</key><string>true</string>
+    <key>ENABLE_ADMIN_CHAT_ACCESS</key><string>$ADMIN_CHAT_ACCESS</string>
+    <key>SCARF_NO_ANALYTICS</key><string>true</string>
+    <key>DO_NOT_TRACK</key><string>true</string>
+    <key>ANONYMIZED_TELEMETRY</key><string>false</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$WEBUI_DATA/openwebui.log</string>
+  <key>StandardErrorPath</key><string>$WEBUI_DATA/openwebui.log</string>
+</dict>
+</plist>
+EOF
+restart_agent com.docintel.openwebui "$AGENTS/com.docintel.openwebui.plist"
+
+echo "Waiting for Open WebUI (the first start downloads a helper model and"
+echo "can take up to 10 minutes) ..."
+WEBUI_UP=no
+for _ in $(seq 1 600); do
+    if curl -s http://127.0.0.1:3000/health >/dev/null; then WEBUI_UP=yes; break; fi
+    sleep 1
+done
+if [ "$WEBUI_UP" = "yes" ]; then
+    echo "OK: Open WebUI is running."
+else
+    echo "NOTE: Open WebUI did not answer within 10 minutes. It may still be"
+    echo "finishing its first start. Wait a few minutes and open"
+    echo "http://localhost:3000 in Safari. If it still doesn't load, look at"
+    echo "$WEBUI_DATA/openwebui.log (SETUP.md section 10)."
+fi
+
+MAC_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo '<mac-ip>')"
 echo
 echo "=============================================================="
-echo " All done. Ollama, the models, the pipeline service and the"
-echo " hourly cleanup are installed and running."
-echo " Next: SETUP.md section 5 (Open WebUI)."
+echo " All done. Ollama, the models, the pipeline service, the hourly"
+echo " cleanup and Open WebUI are installed and running."
+echo
+echo " On this Mac:          http://localhost:3000"
+echo " From office computers: http://$MAC_IP:3000"
+echo
+echo " Next: SETUP.md section 5 (create the admin account)."
 echo "=============================================================="

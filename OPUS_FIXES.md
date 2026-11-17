@@ -359,3 +359,27 @@ it.
 
 **Checked with:** 52 automatic tests, all passing (new ones for B and D),
 and the scanned-PDF upload test against Open WebUI 0.11 described in A.
+
+---
+
+# Update for a fully reset Mac
+
+The Mac Studio was reset and has nothing installed, so SETUP.md no
+longer has to inspect and keep an existing Open WebUI or Ollama.
+
+- **The setup script now installs Open WebUI too** (natively, with uv;
+  no Docker anywhere), as a background service with the right settings
+  from its very first start, including Bypass Embedding and Retrieval.
+  It prints the address for office computers at the end.
+- **Bug fixed in the Open WebUI service file:** native Open WebUI writes
+  its secret key file into the folder it starts in. A background service
+  starts in `/`, which is read-only, so the old SETUP instructions would
+  have made Open WebUI crash on every start. The service now starts in
+  `~/open-webui-data`.
+- **SETUP.md rewritten for an empty Mac:** the Docker and "what's already
+  there" sections are gone. The order is now: check the Mac, developer
+  tools, Homebrew, the setup script, create the admin account, connect
+  the Pipe, test. macOS updates and the firewall prompt are covered.
+- **Admin chat access** can be switched off with one line in `.env`
+  (`OPENWEBUI_ADMIN_CHAT_ACCESS=false`) and running the script again,
+  instead of editing service files by hand (ACCESS.md section 7).

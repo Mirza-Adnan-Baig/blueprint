@@ -1,14 +1,14 @@
 # Giving people access to Open WebUI
 
 This guide explains how colleagues open Open WebUI from their own
-computers (like the `http://192.168.x.x:3000` link you use on your
-Windows PC), how to create their accounts, and how to keep that link
-working. No Terminal knowledge is needed except in two short places,
+computers (with a link like `http://192.168.x.x:3000`), how to create
+their accounts, and how to keep that link working. Do it after SETUP.md
+is finished. No Terminal knowledge is needed except in two short places,
 which are explained.
 
 ---
 
-## How the link you were given works
+## How the link works
 
 A link like `http://192.168.1.50:3000` has two parts:
 
@@ -16,11 +16,11 @@ A link like `http://192.168.1.50:3000` has two parts:
   Every device in the network has one, handed out by the office router.
 - **`3000`** is the "door number" (port) Open WebUI listens on.
 
-The previous admin didn't do anything special for this. Open WebUI is
-set up to listen on the whole office network (in Docker through
-`-p 3000:8080`, in a native install through `--host 0.0.0.0`, see
-SETUP.md section 5), so any computer in the same network can open it by
-typing the Mac's address and `:3000` into a browser. That's all.
+Nothing special is needed for this. The setup script starts Open WebUI
+so that it listens on the whole office network (`--host 0.0.0.0`, see
+SETUP.md section 4.5), so any computer in the same network can open it
+by typing the Mac's address and `:3000` into a browser. The setup script
+prints that link at the end.
 
 Three consequences worth knowing:
 
@@ -89,10 +89,9 @@ give the same address to another device.
 1. On the Mac: **System Settings → Network → Firewall**.
 2. If the firewall is **off**, there's nothing to do.
 3. If it's **on**, click **Options…** and look for Open WebUI's program in
-   the list: **Docker** (if Open WebUI runs in Docker) or **open-webui**
-   or **python** (native install). It must say **Allow incoming
-   connections**. If it isn't listed, restart Open WebUI once; macOS then
-   asks, and you click **Allow**.
+   the list: **python** or **open-webui**. It must say **Allow incoming
+   connections**. If it isn't listed, restart Open WebUI once (SETUP.md
+   section 9); macOS then asks, and you click **Allow**.
 
 ---
 
@@ -208,14 +207,13 @@ Tell staff honestly:
 - Everything stays on the Mac Studio. Nothing is sent to any cloud
   service.
 - **Admins can read other users' chats** in Open WebUI (this is Open
-  WebUI's default). To switch that off, add the setting
-  `ENABLE_ADMIN_CHAT_ACCESS=false` to Open WebUI:
-  - native install: in the file from SETUP.md section 5, option A, add
-    `<key>ENABLE_ADMIN_CHAT_ACCESS</key><string>false</string>` next to
-    the other settings, then restart Open WebUI (SETUP.md section 9).
-  - Docker: add `-e ENABLE_ADMIN_CHAT_ACCESS=false` to the `docker run`
-    command in SETUP.md section 5, option B, and create the container
-    again the same way.
+  WebUI's default). To switch that off:
+  1. Open the settings file: `open -e ~/blueprint/.env`
+  2. Change the last line to `OPENWEBUI_ADMIN_CHAT_ACCESS=false`, save
+     with `Cmd + S` and close TextEdit.
+  3. Run the setup script again: `cd ~/blueprint` and then
+     `bash scripts/setup_mac.sh`. It applies the setting and restarts
+     Open WebUI. Users, chats and settings are kept.
 - The pipeline deletes its copy of uploaded files after 24 hours. Open
   WebUI keeps its own copy of each upload until the chat is deleted.
 
@@ -237,7 +235,7 @@ Tell staff honestly:
 | What they see | What to check |
 |---|---|
 | The page doesn't load at all | Are they in the office network (or connected to the VPN)? Is the Mac on and awake (SETUP.md section 8)? Did the Mac's address change (section 1 and 2)? Is the firewall letting it through (section 3)? |
-| It works on the Mac (`http://localhost:3000`) but not from other computers | Firewall (section 3), or Open WebUI listens only on the Mac itself: in a native install the file from SETUP.md section 5 must contain `--host` and `0.0.0.0`. |
+| It works on the Mac (`http://localhost:3000`) but not from other computers | Firewall (section 3). Then check Open WebUI listens on the network: `lsof -nP -iTCP:3000 -sTCP:LISTEN` on the Mac must show `*:3000`. If it shows `127.0.0.1:3000`, run the setup script again. |
 | The browser says the site can't provide a secure connection | They typed `https://`. It must be `http://`. |
 | "Account Activation Pending" | Approve them (section 4, way B, step 5). |
 | They don't see Document Intelligence | Its visibility (section 5). |
